@@ -46,20 +46,8 @@ jobs:
       - name: Build Windows (release)
         run: flutter build windows --release
 
-      - name: Zip Windows Release
-        shell: pwsh
-        run: |
-          $src = 'build/windows/x64/runner/Release'
-          $zip = Join-Path $src 'swift_control-windows.zip'
-          if (-Not (Test-Path $src)) {
-            Write-Error "Release folder not found: $src"
-            exit 1
-          }
-          if (Test-Path $zip) { Remove-Item $zip -Force }
-          Compress-Archive -Path (Join-Path $src '*') -DestinationPath $zip -Force
-
       - name: Upload Windows release artifact
         uses: actions/upload-artifact@v4
         with:
           name: swift_control-windows-release
-          path: build/windows/x64/runner/Release/swift_control-windows.zip
+          path: build/windows/x64/runner/Release/**
