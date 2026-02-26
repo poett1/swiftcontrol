@@ -1,56 +1,57 @@
-name: "Build Web"
+# name: "Build Web"
 
-on:
-  push:
-    branches:
-      - web
-      - main
-    paths:
-      - '.github/workflows/web.yml'
-      - 'lib/**'
-      - 'accessibility/**'
-      - 'keypress_simulator/**'
-      - 'pubspec.yaml'
+# on:
+#   push:
+#     branches:
+#       - web
+#       - wahoo_kickr_bike_shift
+#       - main
+#     paths:
+#       - '.github/workflows/web.yml'
+#       - 'lib/**'
+#       - 'accessibility/**'
+#       - 'keypress_simulator/**'
+#       - 'pubspec.yaml'
 
-jobs:
-  build:
-    name: Build Web
-    runs-on: macos-latest
+# jobs:
+#   build:
+#     name: Build Web
+#     runs-on: macos-latest
 
-    permissions:
-      id-token: write
-      pages: write
-      contents: write
+#     permissions:
+#       id-token: write
+#       pages: write
+#       contents: write
 
-    steps:
-      #1 Checkout Repository
-      - name: Checkout Repository
-        uses: actions/checkout@v3
+#     steps:
+#       #1 Checkout Repository
+#       - name: Checkout Repository
+#         uses: actions/checkout@v3
 
-        #3 Setup Flutter
-      - name: Set Up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
+#         #3 Setup Flutter
+#       - name: Set Up Flutter
+#         uses: subosito/flutter-action@v2
+#         with:
+#           channel: 'stable'
 
-      - name: Generate translation files
+#       - name: Generate translation files
 
-        run: |
-          flutter pub global activate intl_utils;
-          flutter pub global run intl_utils:generate;
+#         run: |
+#           flutter pub global activate intl_utils;
+#           flutter pub global run intl_utils:generate;
 
-        #4 Install Dependencies
-      - name: Install Dependencies
-        run: flutter pub get
+#         #4 Install Dependencies
+#       - name: Install Dependencies
+#         run: flutter pub get
 
-      - name: Build Web
-        run: flutter build web --release --base-href "/bikecontrol/"
+#       - name: Build Web
+#         run: flutter build web --release --base-href "/swiftcontrol/"
 
-      - name: Upload static files as artifact
-        id: deployment
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: build/web
+#       - name: Upload static files as artifact
+#         id: deployment
+#         uses: actions/upload-pages-artifact@v3
+#         with:
+#           path: build/web
 
-      - name: Web Deploy
-        uses: actions/deploy-pages@v4
+#       - name: Web Deploy
+#         uses: actions/deploy-pages@v4
