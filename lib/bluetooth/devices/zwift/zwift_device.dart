@@ -1,14 +1,16 @@
 import 'dart:async';
 
+import 'package:bike_control/bluetooth/devices/bluetooth_device.dart';
+import 'package:bike_control/bluetooth/devices/zwift/constants.dart';
+import 'package:bike_control/bluetooth/messages/notification.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/i18n_extension.dart';
+import 'package:bike_control/utils/keymap/buttons.dart';
+import 'package:bike_control/utils/single_line_exception.dart';
 import 'package:dartx/dartx.dart';
 import 'package:flutter/foundation.dart';
-import 'package:swift_control/bluetooth/devices/bluetooth_device.dart';
-import 'package:swift_control/bluetooth/devices/zwift/constants.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pbenum.dart';
-import 'package:swift_control/bluetooth/messages/notification.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/keymap/buttons.dart';
-import 'package:swift_control/utils/single_line_exception.dart';
+import 'package:prop/prop.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:universal_ble/universal_ble.dart';
 
 abstract class ZwiftDevice extends BluetoothDevice {
@@ -87,10 +89,10 @@ abstract class ZwiftDevice extends BluetoothDevice {
 
   @override
   Future<void> processCharacteristic(String characteristic, Uint8List bytes) async {
-    if (kDebugMode) {
+    if (kDebugMode && false) {
       actionStreamInternal.add(
         LogNotification(
-          "${DateTime.now().toString().split(" ").last} Received data on $characteristic: ${bytes.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ')}",
+          "Received data on $characteristic: ${bytes.map((e) => e.toRadixString(16).padLeft(2, '0')).join(' ')}",
         ),
       );
     }
@@ -152,10 +154,10 @@ abstract class ZwiftDevice extends BluetoothDevice {
   }
 
   @override
-  Future<void> handleButtonsClicked(List<ControllerButton>? buttonsClicked) async {
+  Future<void> handleButtonsClicked(List<ControllerButton>? buttonsClicked, {bool longPress = false}) async {
     // the same messages are sent multiple times, so ignore
     if (_lastButtonsClicked == null || _lastButtonsClicked?.contentEquals(buttonsClicked ?? []) == false) {
-      super.handleButtonsClicked(buttonsClicked);
+      super.handleButtonsClicked(buttonsClicked, longPress: longPress);
     }
     _lastButtonsClicked = buttonsClicked;
   }
@@ -189,6 +191,26 @@ abstract class ZwiftDevice extends BluetoothDevice {
       syncRxCharacteristic!.uuid,
       vibrateCommand,
       withoutResponse: true,
+    );
+  }
+
+  @override
+  Widget showInformation(BuildContext context) {
+    return Column(
+      spacing: 16,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        super.showInformation(context),
+
+        if (canVibrate)
+          Checkbox(
+            trailing: Expanded(child: Text(context.i18n.enableVibrationFeedback)),
+            state: core.settings.getVibrationEnabled() ? CheckboxState.checked : CheckboxState.unchecked,
+            onChanged: (value) async {
+              await core.settings.setVibrationEnabled(value == CheckboxState.checked);
+            },
+          ),
+      ],
     );
   }
 }

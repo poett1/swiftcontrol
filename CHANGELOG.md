@@ -1,4 +1,75 @@
-### 4.1.0 (unreleased)
+### 4.8.0 (15-02-2026)
+
+**Features**:
+- Bluetooth media buttons are now supported on iOS
+- Shimano Di2: long press and double clicks are now supported:
+  - perform steering using long presses
+  - gear changes are now reflected properly without losing any button presses
+
+### 4.7.0 (04-02-2026)
+
+**Features**:
+- new connection method: act as Bluetooth Keyboard:
+Your device can now act as Bluetooth keyboard, allowing you to send keyboard shortcuts (e.g. for virtual shifting) directly to your connected device. Especially useful for tablets / iPads.
+- added new keyboard shortcuts for Rouvy (Kudos, Pause workout)
+
+**Fixes**:
+- you can now finally buy the full version on Android :)
+- save "Enable Media Key detection" setting across app restarts
+- UI adjustments and fixes in the controller configuration screen
+- iOS: Remote pairing now works again
+
+### 4.6.0 (28-01-2026)
+
+**Features**:
+- Improve Zwift Click V2 connection and handling
+- Buttons in Configuration are now grouped by device
+
+### 4.5.0 (22-01-2026)
+
+**Features**:
+- Android: simulate additional actions for local connection method (Left, Down, Right, Up, Select, Back, Home, Recent Apps)
+  - control your phone with your controller
+  - control UI within the trainer app (if supported)
+- BikeControl now supports individual mapping when you use more than one Cycplus BC2 and ThinkRider VS200 controller
+- Windows & macOS: allow configuration of volume keys on Bluetooth HID devices
+
+### 4.4.0 (16-01-2026)
+
+**Features**:
+- Support for Thinkrider VS200
+
+**Fixes**:
+- Android: Local connection method allows passing keyboard events to the trainer app
+- macOS: Compatibility with macOS Tahoe
+- Windows: send keyboard events to the correct window when using multiple monitors or when another app is focused
+- Windows: fix media key detection
+
+### 4.3.0 (07-01-2026)
+
+**Features**:
+- Onboarding for new users
+- support controlling music & volume for Windows, macOS and Android
+- App is now available in Italian (thanks to Connect_Thanks2613)
+
+**Fixes**:
+- Vibration setting now available for Zwift Ride devices
+
+### 4.2.0 (20-12-2025)
+
+BikeControl now offers a free trial period of 5 days for all features, so you can test everything before deciding to purchase a license. Please contact the support if you experience any issues!
+
+**Features**:
+- support for SRAM AXS/eTap
+  - only single or double click is supported (no individual button mapping possible, yet)
+- use your phone/tablet for steering by attaching your device on your handlebar!
+- App is now available in Polish (thanks to Wandrocek)
+
+**Fixes**:
+- You will now be notified when a connection to your controller is lost
+- improved UI of the Keymap customization screen
+
+### 4.1.0 (16-12-2025)
 
 **Features**:
 - control your trainer manually without requiring a controller - just like a Companion app
@@ -6,7 +77,7 @@
 
 **Fixes**:
 - Gamepads: handle analog values correctly on Windows
-- MyWhoosh: updated default keymap to use steering instead of navigating 
+- MyWhoosh: updated default keymap to use the new A+D keys for steering 
 
 ### 4.0.0 (07-12-2025)
 

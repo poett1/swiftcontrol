@@ -52,3 +52,5 @@ lib/gen/
 
 service-account.json
 .env
+lib/generated
+pubspec_overrides.yaml

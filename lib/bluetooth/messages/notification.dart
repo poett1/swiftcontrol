@@ -1,9 +1,9 @@
+import 'package:bike_control/utils/actions/base_actions.dart';
+import 'package:bike_control/utils/keymap/buttons.dart';
+import 'package:bike_control/widgets/keymap_explanation.dart';
 import 'package:dartx/dartx.dart';
 import 'package:flutter/foundation.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pb.dart';
-import 'package:swift_control/utils/actions/base_actions.dart';
-import 'package:swift_control/utils/keymap/buttons.dart';
-import 'package:swift_control/widgets/keymap_explanation.dart';
+import 'package:prop/prop.dart';
 
 class BaseNotification {}
 
@@ -11,9 +11,7 @@ class LogNotification extends BaseNotification {
   final String message;
 
   LogNotification(this.message) {
-    if (kDebugMode) {
-      print('LogNotification: $message');
-    }
+    Logger.debug('LogNotification: $message');
   }
 
   @override
@@ -68,8 +66,10 @@ class ActionNotification extends BaseNotification {
 class AlertNotification extends LogNotification {
   final LogLevel level;
   final String alertMessage;
+  final VoidCallback? onTap;
+  final String? buttonTitle;
 
-  AlertNotification(this.level, this.alertMessage) : super(alertMessage);
+  AlertNotification(this.level, this.alertMessage, {this.onTap, this.buttonTitle}) : super(alertMessage);
 
   @override
   String toString() {

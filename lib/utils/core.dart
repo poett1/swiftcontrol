@@ -1,36 +1,35 @@
 import 'dart:io';
 
+import 'package:bike_control/bluetooth/devices/openbikecontrol/obc_ble_emulator.dart';
+import 'package:bike_control/bluetooth/devices/openbikecontrol/obc_mdns_emulator.dart';
+import 'package:bike_control/bluetooth/devices/openbikecontrol/protocol_parser.dart';
+import 'package:bike_control/bluetooth/devices/trainer_connection.dart';
+import 'package:bike_control/bluetooth/devices/zwift/ftms_mdns_emulator.dart';
+import 'package:bike_control/bluetooth/devices/zwift/zwift_emulator.dart';
+import 'package:bike_control/bluetooth/messages/notification.dart';
+import 'package:bike_control/bluetooth/remote_keyboard_pairing.dart';
+import 'package:bike_control/bluetooth/remote_pairing.dart';
+import 'package:bike_control/main.dart';
+import 'package:bike_control/utils/actions/android.dart';
+import 'package:bike_control/utils/actions/base_actions.dart';
+import 'package:bike_control/utils/actions/remote.dart';
+import 'package:bike_control/utils/keymap/apps/my_whoosh.dart';
+import 'package:bike_control/utils/keymap/apps/supported_app.dart';
+import 'package:bike_control/utils/requirements/android.dart';
+import 'package:bike_control/utils/settings/settings.dart';
 import 'package:dartx/dartx.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:media_key_detector/media_key_detector.dart';
-import 'package:swift_control/bluetooth/devices/hid/hid_device.dart';
-import 'package:swift_control/bluetooth/devices/openbikecontrol/obc_ble_emulator.dart';
-import 'package:swift_control/bluetooth/devices/openbikecontrol/obc_mdns_emulator.dart';
-import 'package:swift_control/bluetooth/devices/openbikecontrol/protocol_parser.dart';
-import 'package:swift_control/bluetooth/devices/trainer_connection.dart';
-import 'package:swift_control/bluetooth/devices/zwift/ftms_mdns_emulator.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pb.dart';
-import 'package:swift_control/bluetooth/devices/zwift/zwift_emulator.dart';
-import 'package:swift_control/bluetooth/messages/notification.dart';
-import 'package:swift_control/bluetooth/remote_pairing.dart';
-import 'package:swift_control/main.dart';
-import 'package:swift_control/utils/actions/android.dart';
-import 'package:swift_control/utils/actions/base_actions.dart';
-import 'package:swift_control/utils/actions/remote.dart';
-import 'package:swift_control/utils/keymap/apps/my_whoosh.dart';
-import 'package:swift_control/utils/keymap/buttons.dart';
-import 'package:swift_control/utils/requirements/android.dart';
-import 'package:swift_control/utils/settings/settings.dart';
+import 'package:prop/prop.dart';
 import 'package:universal_ble/universal_ble.dart';
 
 import '../bluetooth/connection.dart';
 import '../bluetooth/devices/mywhoosh/link.dart';
 import 'keymap/apps/rouvy.dart';
+import 'media_key_handler.dart';
 import 'requirements/multi.dart';
 import 'requirements/platform.dart';
-import 'smtc_stub.dart' if (dart.library.io) 'package:smtc_windows/smtc_windows.dart';
 
 final core = Core();
 
@@ -46,6 +45,7 @@ class Core {
   late final obpMdnsEmulator = OpenBikeControlMdnsEmulator();
   late final obpBluetoothEmulator = OpenBikeControlBluetoothEmulator();
   late final remotePairing = RemotePairing();
+  late final remoteKeyboardPairing = RemoteKeyboardPairing();
 
   late final mediaKeyHandler = MediaKeyHandler();
   late final logic = CoreLogic();
@@ -55,7 +55,9 @@ class Core {
 class Permissions {
   Future<List<PlatformRequirement>> getScanRequirements() async {
     final List<PlatformRequirement> list;
-    if (kIsWeb) {
+    if (screenshotMode) {
+      list = [];
+    } else if (kIsWeb) {
       final availablity = await UniversalBle.getBluetoothAvailabilityState();
       if (availablity == AvailabilityState.unsupported) {
         list = [UnsupportedPlatform()];
@@ -63,27 +65,32 @@ class Permissions {
         list = [BluetoothTurnedOn()];
       }
     } else if (Platform.isMacOS) {
-      list = [BluetoothTurnedOn()];
+      list = [
+        BluetoothTurnedOn(),
+        if (core.settings.getShowOnboarding()) NotificationRequirement(),
+      ];
     } else if (Platform.isIOS) {
       list = [
         BluetoothTurnedOn(),
+        NotificationRequirement(),
       ];
     } else if (Platform.isWindows) {
       list = [
         BluetoothTurnedOn(),
+        NotificationRequirement(),
       ];
     } else if (Platform.isAndroid) {
       final deviceInfoPlugin = DeviceInfoPlugin();
       final deviceInfo = await deviceInfoPlugin.androidInfo;
       list = [
-        BluetoothTurnedOn(),
-        NotificationRequirement(),
         if (deviceInfo.version.sdkInt <= 30)
           LocationRequirement()
         else ...[
           BluetoothScanRequirement(),
           BluetoothConnectRequirement(),
         ],
+        BluetoothTurnedOn(),
+        NotificationRequirement(),
       ];
     } else {
       list = [UnsupportedPlatform()];
@@ -101,6 +108,8 @@ class Permissions {
     return [
       BluetoothTurnedOn(),
       if (Platform.isAndroid) ...[
+        BluetoothScanRequirement(),
+        BluetoothConnectRequirement(),
         BluetoothAdvertiseRequirement(),
       ],
     ];
@@ -161,16 +170,24 @@ class CoreLogic {
   }
 
   bool get showObpMdnsEmulator {
-    return core.settings.getTrainerApp()?.supportsOpenBikeProtocol == true;
+    return core.settings.getTrainerApp()?.supportsOpenBikeProtocol.containsAny([
+          OpenBikeProtocolSupport.network,
+          OpenBikeProtocolSupport.dircon,
+        ]) ==
+        true;
   }
 
   bool get showObpBluetoothEmulator {
-    return (core.settings.getTrainerApp()?.supportsOpenBikeProtocol == true) &&
+    return (core.settings.getTrainerApp()?.supportsOpenBikeProtocol.contains(OpenBikeProtocolSupport.ble) == true) &&
         core.settings.getLastTarget() != Target.thisDevice;
   }
 
   bool get isRemoteControlEnabled {
     return core.settings.getRemoteControlEnabled() && showRemote;
+  }
+
+  bool get isRemoteKeyboardControlEnabled {
+    return core.settings.getRemoteKeyboardControlEnabled() && showRemote;
   }
 
   bool get showMyWhooshLink =>
@@ -200,11 +217,11 @@ class CoreLogic {
 
   bool get ignoreWarnings =>
       core.settings.getTrainerApp()?.supportsZwiftEmulation == true ||
-      core.settings.getTrainerApp()?.supportsOpenBikeProtocol == true;
+      core.settings.getTrainerApp()?.supportsOpenBikeProtocol.isNotEmpty == true;
 
   bool get showLocalRemoteOptions =>
       core.actionHandler.supportedModes.isNotEmpty &&
-      ((showLocalControl && core.settings.getLocalEnabled()) || (isRemoteControlEnabled));
+      (showLocalControl || isRemoteControlEnabled || isRemoteKeyboardControlEnabled);
 
   bool get hasNoConnectionMethod =>
       !screenshotMode &&
@@ -229,7 +246,18 @@ class CoreLogic {
     if (isZwiftBleEnabled) core.zwiftEmulator,
     if (isZwiftMdnsEnabled) core.zwiftMdnsEmulator,
     if (isRemoteControlEnabled) core.remotePairing,
+    if (isRemoteKeyboardControlEnabled) core.remoteKeyboardPairing,
   ].filter((e) => e.isConnected.value).toList();
+
+  List<TrainerConnection> get enabledTrainerConnections => [
+    if (isMyWhooshLinkEnabled) core.whooshLink,
+    if (isObpMdnsEnabled) core.obpMdnsEmulator,
+    if (isObpBleEnabled) core.obpBluetoothEmulator,
+    if (isZwiftBleEnabled) core.zwiftEmulator,
+    if (isZwiftMdnsEnabled) core.zwiftMdnsEmulator,
+    if (isRemoteControlEnabled) core.remotePairing,
+    if (isRemoteKeyboardControlEnabled) core.remoteKeyboardPairing,
+  ];
 
   List<TrainerConnection> get trainerConnections => [
     if (showMyWhooshLink) core.whooshLink,
@@ -238,6 +266,7 @@ class CoreLogic {
     if (showZwiftBleEmulator) core.zwiftEmulator,
     if (showZwiftMsdnEmulator) core.zwiftMdnsEmulator,
     if (showRemote) core.remotePairing,
+    if (showRemote) core.remoteKeyboardPairing,
   ];
 
   Future<bool> isTrainerConnected() async {
@@ -263,7 +292,8 @@ class CoreLogic {
     if (isZwiftBleEnabled &&
         await core.permissions.getRemoteControlRequirements().allGranted &&
         !core.zwiftEmulator.isStarted.value) {
-      core.zwiftEmulator.startAdvertising(() {}).catchError((e) {
+      core.zwiftEmulator.startAdvertising(() {}).catchError((e, s) {
+        recordError(e, s, context: 'Zwift BLE Emulator');
         core.settings.setZwiftBleEmulatorEnabled(false);
         core.connection.signalNotification(
           AlertNotification(LogLevel.LOGLEVEL_WARNING, 'Failed to start Zwift mDNS Emulator: $e'),
@@ -271,7 +301,8 @@ class CoreLogic {
       });
     }
     if (isZwiftMdnsEnabled && !core.zwiftMdnsEmulator.isStarted.value) {
-      core.zwiftMdnsEmulator.startServer().catchError((e) {
+      core.zwiftMdnsEmulator.startServer().catchError((e, s) {
+        recordError(e, s, context: 'Zwift mDNS Emulator');
         core.settings.setZwiftMdnsEmulatorEnabled(false);
         core.connection.signalNotification(
           AlertNotification(LogLevel.LOGLEVEL_WARNING, 'Failed to start Zwift mDNS Emulator: $e'),
@@ -279,7 +310,8 @@ class CoreLogic {
       });
     }
     if (isObpMdnsEnabled && !core.obpMdnsEmulator.isStarted.value) {
-      core.obpMdnsEmulator.startServer().catchError((e) {
+      core.obpMdnsEmulator.startServer().catchError((e, s) {
+        recordError(e, s, context: 'OBP mDNS Emulator');
         core.settings.setObpMdnsEnabled(false);
         core.connection.signalNotification(
           AlertNotification(LogLevel.LOGLEVEL_WARNING, 'Failed to start OpenBikeControl mDNS Emulator: $e'),
@@ -289,7 +321,8 @@ class CoreLogic {
     if (isObpBleEnabled &&
         await core.permissions.getRemoteControlRequirements().allGranted &&
         !core.obpBluetoothEmulator.isStarted.value) {
-      core.obpBluetoothEmulator.startServer().catchError((e) {
+      core.obpBluetoothEmulator.startServer().catchError((e, s) {
+        recordError(e, s, context: 'OBP BLE Emulator');
         core.settings.setObpBleEnabled(false);
         core.connection.signalNotification(
           AlertNotification(LogLevel.LOGLEVEL_WARNING, 'Failed to start OpenBikeControl BLE Emulator: $e'),
@@ -302,97 +335,23 @@ class CoreLogic {
     }
 
     if (isRemoteControlEnabled && !core.remotePairing.isStarted.value) {
-      core.remotePairing.startAdvertising().catchError((e) {
+      core.remotePairing.startAdvertising().catchError((e, s) {
+        recordError(e, s, context: 'Remote Pairing');
         core.settings.setRemoteControlEnabled(false);
         core.connection.signalNotification(
           AlertNotification(LogLevel.LOGLEVEL_WARNING, 'Failed to start Remote Control pairing: $e'),
         );
       });
     }
-  }
-}
 
-class MediaKeyHandler {
-  final ValueNotifier<bool> isMediaKeyDetectionEnabled = ValueNotifier(false);
-
-  bool _smtcInitialized = false;
-  SMTCWindows? _smtc;
-
-  void initialize() {
-    isMediaKeyDetectionEnabled.addListener(() async {
-      if (!isMediaKeyDetectionEnabled.value) {
-        if (Platform.isWindows) {
-          _smtc?.disableSmtc();
-        } else {
-          mediaKeyDetector.setIsPlaying(isPlaying: false);
-          mediaKeyDetector.removeListener(_onMediaKeyDetectedListener);
-        }
-      } else {
-        if (Platform.isWindows) {
-          if (!_smtcInitialized) {
-            _smtcInitialized = true;
-            await SMTCWindows.initialize();
-          }
-
-          _smtc = SMTCWindows(
-            metadata: const MusicMetadata(
-              title: 'BikeControl Media Key Handler',
-              album: 'BikeControl',
-              albumArtist: 'BikeControl',
-              artist: 'BikeControl',
-            ),
-            // Timeline info for the OS media player
-            timeline: const PlaybackTimeline(
-              startTimeMs: 0,
-              endTimeMs: 1000,
-              positionMs: 0,
-              minSeekTimeMs: 0,
-              maxSeekTimeMs: 1000,
-            ),
-            config: const SMTCConfig(
-              fastForwardEnabled: true,
-              nextEnabled: true,
-              pauseEnabled: true,
-              playEnabled: true,
-              rewindEnabled: true,
-              prevEnabled: true,
-              stopEnabled: true,
-            ),
-          );
-          _smtc!.buttonPressStream.listen(_onMediaKeyPressedListener);
-        } else {
-          mediaKeyDetector.addListener(_onMediaKeyDetectedListener);
-          mediaKeyDetector.setIsPlaying(isPlaying: true);
-        }
-      }
-    });
-  }
-
-  void _onMediaKeyDetectedListener(MediaKey mediaKey) {
-    _onMediaKeyPressedListener(switch (mediaKey) {
-      MediaKey.playPause => PressedButton.play,
-      MediaKey.rewind => PressedButton.rewind,
-      MediaKey.fastForward => PressedButton.fastForward,
-      MediaKey.volumeUp => PressedButton.channelUp,
-      MediaKey.volumeDown => PressedButton.channelDown,
-    });
-  }
-
-  Future<void> _onMediaKeyPressedListener(PressedButton mediaKey) async {
-    final hidDevice = HidDevice('HID Device');
-    final keyPressed = mediaKey.name;
-
-    final button = hidDevice.getOrAddButton(
-      keyPressed,
-      () => ControllerButton(keyPressed),
-    );
-
-    var availableDevice = core.connection.controllerDevices.firstOrNullWhere((e) => e.name == hidDevice.name);
-    if (availableDevice == null) {
-      core.connection.addDevices([hidDevice]);
-      availableDevice = hidDevice;
+    if (isRemoteKeyboardControlEnabled && !core.remoteKeyboardPairing.isStarted.value) {
+      core.remoteKeyboardPairing.startAdvertising().catchError((e, s) {
+        recordError(e, s, context: 'Remote Keyboard Pairing');
+        core.settings.setRemoteKeyboardControlEnabled(false);
+        core.connection.signalNotification(
+          AlertNotification(LogLevel.LOGLEVEL_WARNING, 'Failed to start Remote Keyboard Control pairing: $e'),
+        );
+      });
     }
-    availableDevice.handleButtonsClicked([button]);
-    availableDevice.handleButtonsClicked([]);
   }
 }

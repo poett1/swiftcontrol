@@ -8,6 +8,8 @@
 
 #include <bluetooth_low_energy_windows/bluetooth_low_energy_windows_plugin_c_api.h>
 #include <file_selector_windows/file_selector_windows.h>
+#include <flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h>
+#include <flutter_volume_controller/flutter_volume_controller_plugin_c_api.h>
 #include <gamepads_windows/gamepads_windows_plugin_c_api.h>
 #include <keypress_simulator_windows/keypress_simulator_windows_plugin_c_api.h>
 #include <media_key_detector_windows/media_key_detector_windows.h>
@@ -17,12 +19,17 @@
 #include <universal_ble/universal_ble_plugin_c_api.h>
 #include <url_launcher_windows/url_launcher_windows.h>
 #include <window_manager/window_manager_plugin.h>
+#include <windows_iap/windows_iap_plugin_c_api.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
   BluetoothLowEnergyWindowsPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("BluetoothLowEnergyWindowsPluginCApi"));
   FileSelectorWindowsRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FileSelectorWindows"));
+  FlutterSecureStorageWindowsPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("FlutterSecureStorageWindowsPlugin"));
+  FlutterVolumeControllerPluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("FlutterVolumeControllerPluginCApi"));
   GamepadsWindowsPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("GamepadsWindowsPluginCApi"));
   KeypressSimulatorWindowsPluginCApiRegisterWithRegistrar(
@@ -41,4 +48,6 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("UrlLauncherWindows"));
   WindowManagerPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("WindowManagerPlugin"));
+  WindowsIapPluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("WindowsIapPluginCApi"));
 }

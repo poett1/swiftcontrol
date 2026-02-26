@@ -1,14 +1,19 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:bike_control/bluetooth/devices/gyroscope/gyroscope_steering.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/iap/iap_manager.dart';
+import 'package:bike_control/utils/keymap/apps/supported_app.dart';
+import 'package:bike_control/utils/requirements/android.dart';
+import 'package:bike_control/utils/requirements/multi.dart';
 import 'package:dartx/dartx.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider_windows/path_provider_windows.dart';
+import 'package:prop/emulators/prefs.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_windows/shared_preferences_windows.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/keymap/apps/supported_app.dart';
-import 'package:swift_control/utils/requirements/multi.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../main.dart';
@@ -22,7 +27,19 @@ class Settings {
   Future<String?> init({bool retried = false}) async {
     try {
       prefs = await SharedPreferences.getInstance();
+      propPrefs.initialize(prefs);
+      try {
+        await NotificationRequirement.setup();
+      } catch (error, stack) {
+        recordError(error, stack, context: 'Notification setup');
+      }
       initializeActions(getLastTarget()?.connectionType ?? ConnectionType.unknown);
+
+      if (getShowOnboarding() && getTrainerApp() != null) {
+        // If onboarding is to be shown, but a trainer app is already set,
+        // skip onboarding and set to not show again.
+        await setShowOnboarding(false);
+      }
 
       if (core.actionHandler is DesktopActions) {
         // Must add this line.
@@ -31,6 +48,15 @@ class Settings {
 
       final app = getKeyMap();
       core.actionHandler.init(app);
+
+      // Initialize IAP manager
+      await IAPManager.instance.initialize();
+
+      // Start trial if this is the first launch
+      if (!IAPManager.instance.hasTrialStarted && !IAPManager.instance.isPurchased.value) {
+        await IAPManager.instance.startTrial();
+      }
+
       return null;
     } catch (e, s) {
       if (!retried) {
@@ -58,7 +84,8 @@ class Settings {
 
   Future<void> reset() async {
     await prefs.clear();
-    core.actionHandler.init(null);
+    IAPManager.instance.reset(true);
+    init();
   }
 
   void setTrainerApp(SupportedApp app) {
@@ -71,12 +98,6 @@ class Settings {
       return null;
     }
     return SupportedApp.supportedApps.firstOrNullWhere((e) => e.name == appName);
-  }
-
-  bool knowsAboutNameChange() {
-    final knows = prefs.getBool('name_change') == true;
-    prefs.setBool('name_change', true);
-    return knows;
   }
 
   Future<void> setKeyMap(SupportedApp app) async {
@@ -175,6 +196,7 @@ class Settings {
   Future<void> setLastTarget(Target target) async {
     await prefs.setString('last_target', target.name);
     initializeActions(target.connectionType);
+    IAPManager.instance.setAttributes();
   }
 
   Future<void> setLastSeenVersion(String version) async {
@@ -297,6 +319,14 @@ class Settings {
     return prefs.getBool('remote_control_enabled') ?? false;
   }
 
+  void setRemoteKeyboardControlEnabled(bool value) {
+    prefs.setBool('remote_keyboard_control_enabled', value);
+  }
+
+  bool getRemoteKeyboardControlEnabled() {
+    return prefs.getBool('remote_keyboard_control_enabled') ?? false;
+  }
+
   bool getLocalEnabled() {
     return prefs.getBool('local_control_enabled') ?? false;
   }
@@ -336,5 +366,60 @@ class Settings {
     final hotkeys = getButtonSimulatorHotkeys();
     hotkeys.remove(action);
     await setButtonSimulatorHotkeys(hotkeys);
+  }
+
+  void setPhoneSteeringEnabled(bool value) {
+    prefs.setBool('phone_steering_enabled', value);
+  }
+
+  bool getPhoneSteeringEnabled() {
+    return prefs.getBool('phone_steering_enabled') ?? false;
+  }
+
+  void setPhoneSteeringThreshold(int value) {
+    prefs.setInt('phone_steering_threshold', value);
+  }
+
+  double getPhoneSteeringThreshold() {
+    return prefs.getInt('phone_steering_threshold')?.toDouble() ?? GyroscopeSteering.STEERING_THRESHOLD;
+  }
+
+  // SRAM AXS Settings
+  static const int _sramAxsDoubleClickWindowDefaultMs = 350;
+  static const int _sramAxsDoubleClickWindowMinMs = 150;
+  static const int _sramAxsDoubleClickWindowMaxMs = 800;
+
+  int getSramAxsDoubleClickWindowMs() {
+    final v = prefs.getInt('sram_axs_double_click_window_ms') ?? _sramAxsDoubleClickWindowDefaultMs;
+    return v.clamp(_sramAxsDoubleClickWindowMinMs, _sramAxsDoubleClickWindowMaxMs);
+  }
+
+  Future<void> setSramAxsDoubleClickWindowMs(int ms) async {
+    final v = ms.clamp(_sramAxsDoubleClickWindowMinMs, _sramAxsDoubleClickWindowMaxMs);
+    await prefs.setInt('sram_axs_double_click_window_ms', v);
+  }
+
+  bool getShowOnboarding() {
+    return !kIsWeb && (prefs.getBool('show_onboarding') ?? true);
+  }
+
+  Future<void> setShowOnboarding(bool show) async {
+    await prefs.setBool('show_onboarding', show);
+  }
+
+  bool hasAskedPermissions() {
+    return prefs.getBool('asked_permissions') ?? false;
+  }
+
+  Future<void> setHasAskedPermissions(bool asked) async {
+    await prefs.setBool('asked_permissions', asked);
+  }
+
+  bool getMediaKeyDetectionEnabled() {
+    return prefs.getBool('media_key_detection_enabled') ?? false;
+  }
+
+  Future<void> setMediaKeyDetectionEnabled(bool enabled) async {
+    await prefs.setBool('media_key_detection_enabled', enabled);
   }
 }

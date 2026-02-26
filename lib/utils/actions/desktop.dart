@@ -1,9 +1,11 @@
-import 'dart:ui';
-
+import 'package:bike_control/main.dart';
+import 'package:bike_control/utils/actions/base_actions.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/iap/iap_manager.dart';
+import 'package:bike_control/utils/keymap/buttons.dart';
+import 'package:bike_control/widgets/ui/toast.dart';
 import 'package:keypress_simulator/keypress_simulator.dart';
-import 'package:swift_control/utils/actions/base_actions.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/keymap/buttons.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 class DesktopActions extends BaseActions {
   DesktopActions({super.supportedModes = const [SupportedMode.keyboard, SupportedMode.touch, SupportedMode.media]});
@@ -19,10 +21,39 @@ class DesktopActions extends BaseActions {
     final keyPair = supportedApp!.keymap.getKeyPair(button)!;
 
     if (core.settings.getLocalEnabled()) {
+      // Handle media keys
+      if (keyPair.isSpecialKey) {
+        try {
+          await keyPressSimulator.simulateMediaKey(keyPair.physicalKey!);
+          // Increment command count after successful execution
+          await IAPManager.instance.incrementCommandCount();
+          return Success('Media key pressed: $keyPair');
+        } catch (e) {
+          return Error('Failed to simulate media key: $e');
+        }
+      }
+
       if (keyPair.physicalKey != null) {
+        // Increment command count after successful execution
+        await IAPManager.instance.incrementCommandCount();
+        if (keyPair.logicalKey != null && navigatorKey.currentContext?.mounted == true) {
+          final label = keyPair.logicalKey!.keyLabel;
+          final keyName = label.isNotEmpty ? label : keyPair.logicalKey!.debugName ?? 'Key';
+          buildToast(
+            location: ToastLocation.bottomLeft,
+            title:
+                '${isKeyDown
+                    ? "↓"
+                    : isKeyUp
+                    ? "↑"
+                    : "•"} $keyName',
+          );
+        }
+
         if (isKeyDown && isKeyUp) {
           await keyPressSimulator.simulateKeyDown(keyPair.physicalKey, keyPair.modifiers);
           await keyPressSimulator.simulateKeyUp(keyPair.physicalKey, keyPair.modifiers);
+
           return Success('Key clicked: $keyPair');
         } else if (isKeyDown) {
           await keyPressSimulator.simulateKeyDown(keyPair.physicalKey, keyPair.modifiers);
@@ -34,6 +65,8 @@ class DesktopActions extends BaseActions {
       } else {
         final point = await resolveTouchPosition(keyPair: keyPair, windowInfo: null);
         if (point != Offset.zero) {
+          // Increment command count after successful execution
+          await IAPManager.instance.incrementCommandCount();
           if (isKeyDown && isKeyUp) {
             await keyPressSimulator.simulateMouseClickDown(point);
             // slight move to register clicks on some apps, see issue #116
@@ -61,4 +94,7 @@ class DesktopActions extends BaseActions {
       }
     }
   }
+
+  @override
+  void cleanup() {}
 }

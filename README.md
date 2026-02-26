@@ -6,19 +6,16 @@
 
 With BikeControl you can **control your favorite trainer app** using your Zwift Click, Zwift Ride, Zwift Play, Shimano Di2, or other similar devices. Here's what you can do with it, depending on your configuration:
 - Virtual Gear shifting
-- Steering/turning
+- Steering / navigation
 - adjust workout intensity
 - control music on your device
 - more? If you can do it via keyboard, mouse, or touch, you can do it with BikeControl
 
-
-https://github.com/user-attachments/assets/1f81b674-1628-4763-ad66-5f3ed7a3f159
-
+[![Youtube Video](https://github.com/user-attachments/assets/14a45ca1-e31b-4fbd-8d03-95aa60470405)](https://youtu.be/0r3LO5lFlyc)
 
 
-
-## Downloads
-Best follow our landing page and the "Get Started" button: [bikecontrol.app](https://bikecontrol.app/) to understand on which platform you want to run BikeControl.
+## Download
+Best follow our landing page and the "Get Started" button: [bikecontrol.app](https://bikecontrol.app/) to understand on which platform you want to run BikeControl. A testing period is available, allowing you to try out the full functionality of BikeControl:
 
 <a href="https://play.google.com/store/apps/details?id=de.jonasbark.swiftcontrol"><img width="270" height="80" alt="GetItOnGooglePlay_Badge_Web_color_English" src="https://github.com/user-attachments/assets/a059d5a1-2efb-4f65-8117-ef6a99823b21" /></a>
 
@@ -31,7 +28,7 @@ Best follow our landing page and the "Get Started" button: [bikecontrol.app](htt
 ## Supported Apps
 - MyWhoosh
 - Zwift
-- TrainingPeaks Virtual / indieVelo
+- TrainingPeaks Virtual
 - Biketerra.com
 - Rouvy
 - [OpenBikeControl](https://openbikecontrol.org) compatible apps
@@ -45,13 +42,21 @@ Best follow our landing page and the "Get Started" button: [bikecontrol.app](htt
 - Zwift Play
 - Shimano Di2
   - Configure your levers to use D-Fly channels with Shimano E-Tube app
+- SRAM AXS/eTap
+  - Configure your levers not to do any action in the "SRAM AXS" app
+  - only single or double click is supported (no individual button mapping possible, yet)
 - Wahoo Kickr Bike Shift
 - Wahoo Kickr Bike Pro
 - CYCPLUS BC2 Virtual Shifter
+- Thinkrider VS200 Virtual Shifter (beta)
 - Elite Sterzo Smart (for steering support)
 - Elite Square Smart Frame (beta)
+- Your Phone!
+  - Mount your phone on the handlebar to detect e.g. steering
+  - Available on Android and iOS
 - Gamepads
 - Keyboard input
+  - like a Companion App
   - some trainers do not support keyboard input for all functions - now they do!
   - useful when remapping keys from other devices using e.g. AutoHotkey
 - Cheap Bluetooth buttons such as [these](https://www.amazon.com/s?k=bluetooth+remote) (beta)
@@ -70,7 +75,7 @@ Support for other devices can be added; check the issues tab here on GitHub.
 ## Supported Platforms
 
 Follow the "Get Started" button over at [bikecontrol.app](https://bikecontrol.app) to understand on which platform you want to run BikeControl.
-You can even try it out in your [Browser](https://jonasbark.github.io/swiftcontrol/), if it supports Bluetooth connections. No controlling possible, though.
+You can even try it out in your [Browser](https://openbikecontrol.github.io/bikecontrol/), if it supports Bluetooth connections. No controlling possible, though.
 
 ## Help
 Check the troubleshooting guide [here](TROUBLESHOOTING.md).
@@ -78,19 +83,16 @@ Check the troubleshooting guide [here](TROUBLESHOOTING.md).
 ## How does it work?
 The app connects to your Controller devices (such as Zwift ones) automatically. BikeControl uses different methods of connecting to the trainer app, depending on the trainer app and operating system:
 - Connect to the trainer app on the same device or on another device using Network
-    - available on Android, iOS, macOS, Windows
+    - available on Android, iOS, iPadOS, macOS, Windows
     - supported by e.g. MyWhoosh, Rouvy and Zwift
 - Connect to the trainer app on another device by simulating a Bluetooth device
-  - available on Android, iOS, macOS, Windows
+  - available on Android, iOS, iPadOS, macOS, Windows
   - supported by e.g. Rouvy and Zwift
 - Directly control the trainer app via Accessibility features (simulating touch and keyboard input)
   - available on Android, macOS, Windows
   - supported by all trainer apps
-- Connect to supported trainer app using the [OpenBikeControl](https://openbikecontrol.org) protocol
-  - available on Android, iOS, macOS, Windows
-
-## Alternatives
-- [qdomyos-zwift](https://www.qzfitness.com/) directly controls the trainer (as opposed to controlling the trainer app). This can be useful if your trainer app does not support virtual shifting.
+- Connect to the supported trainer app using the [OpenBikeControl](https://openbikecontrol.org) protocol
+  - available on Android, iOS, iPadOS, macOS, Windows
 
 ## Donate
 Please consider donating to support the development of this app :)

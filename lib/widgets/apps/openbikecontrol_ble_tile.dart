@@ -1,9 +1,11 @@
+import 'package:bike_control/main.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/i18n_extension.dart';
+import 'package:bike_control/widgets/ui/connection_method.dart';
+import 'package:bike_control/widgets/ui/toast.dart';
+import 'package:dartx/dartx.dart';
+import 'package:prop/prop.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pb.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/i18n_extension.dart';
-import 'package:swift_control/widgets/ui/connection_method.dart';
-import 'package:swift_control/widgets/ui/toast.dart';
 
 class OpenBikeControlBluetoothTile extends StatefulWidget {
   const OpenBikeControlBluetoothTile({super.key});
@@ -22,11 +24,14 @@ class _OpenBikeProtocolTileState extends State<OpenBikeControlBluetoothTile> {
           valueListenable: core.obpBluetoothEmulator.connectedApp,
           builder: (context, isConnected, _) {
             return ConnectionMethod(
+              supportedActions: isConnected?.supportedActions,
               isEnabled: core.settings.getObpBleEnabled(),
               type: ConnectionMethodType.openBikeControl,
               title: context.i18n.connectUsingBluetooth,
               description: isConnected != null
-                  ? context.i18n.connectedTo(isConnected.appId)
+                  ? context.i18n.connectedTo(
+                      "${isConnected.appId}:\n${isConnected.supportedActions.joinToString(transform: (s) => s.title)}",
+                    )
                   : isStarted
                   ? context.i18n.chooseBikeControlInConnectionScreen
                   : context.i18n.letsAppConnectOverBluetooth(core.settings.getTrainerApp()?.name ?? ''),
@@ -36,10 +41,10 @@ class _OpenBikeProtocolTileState extends State<OpenBikeControlBluetoothTile> {
                 if (!value) {
                   core.obpBluetoothEmulator.stopServer();
                 } else if (value) {
-                  core.obpBluetoothEmulator.startServer().catchError((e) {
+                  core.obpBluetoothEmulator.startServer().catchError((e, s) {
+                    recordError(e, s, context: 'OBP BLE Emulator');
                     core.settings.setObpBleEnabled(false);
                     buildToast(
-                      context,
                       level: LogLevel.LOGLEVEL_WARNING,
                       title: context.i18n.errorStartingOpenBikeControlBluetoothServer,
                     );

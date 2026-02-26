@@ -1,9 +1,10 @@
+import 'package:prop/prop.dart';
+import 'package:bike_control/bluetooth/messages/notification.dart';
+import 'package:bike_control/main.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/i18n_extension.dart';
+import 'package:bike_control/widgets/ui/connection_method.dart';
 import 'package:flutter/material.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pb.dart';
-import 'package:swift_control/bluetooth/messages/notification.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/i18n_extension.dart';
-import 'package:swift_control/widgets/ui/connection_method.dart';
 
 class ZwiftMdnsTile extends StatefulWidget {
   final VoidCallback onUpdate;
@@ -26,6 +27,7 @@ class _ZwiftTileState extends State<ZwiftMdnsTile> {
             return StatefulBuilder(
               builder: (context, setState) {
                 return ConnectionMethod(
+                  supportedActions: core.zwiftMdnsEmulator.supportedActions,
                   type: ConnectionMethodType.network,
                   isEnabled: core.settings.getZwiftMdnsEmulatorEnabled(),
                   title: context.i18n.enableZwiftControllerNetwork,
@@ -40,7 +42,8 @@ class _ZwiftTileState extends State<ZwiftMdnsTile> {
                   onChange: (start) {
                     core.settings.setZwiftMdnsEmulatorEnabled(start);
                     if (start) {
-                      core.zwiftMdnsEmulator.startServer().catchError((e) {
+                      core.zwiftMdnsEmulator.startServer().catchError((e, s) {
+                        recordError(e, s, context: 'Zwift mDNS Emulator');
                         core.settings.setZwiftMdnsEmulatorEnabled(false);
                         core.connection.signalNotification(AlertNotification(LogLevel.LOGLEVEL_ERROR, e.toString()));
                         setState(() {});

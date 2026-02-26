@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/i18n_extension.dart';
+import 'package:bike_control/widgets/ui/toast.dart';
+import 'package:dartx/dartx.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show SelectionArea;
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/i18n_extension.dart';
-import 'package:swift_control/widgets/ui/toast.dart';
 
 import '../bluetooth/messages/notification.dart';
 
@@ -68,7 +69,7 @@ class _LogviewerState extends State<LogViewer> {
                       .join('\n');
                   Clipboard.setData(ClipboardData(text: logText));
 
-                  buildToast(context, title: context.i18n.logsHaveBeenCopiedToClipboard);
+                  buildToast(title: context.i18n.logsHaveBeenCopiedToClipboard);
                 },
               ),
             ],
@@ -78,57 +79,54 @@ class _LogviewerState extends State<LogViewer> {
               : Expanded(
                   child: Card(
                     child: SelectionArea(
-                      child: ListView(
+                      child: SingleChildScrollView(
                         controller: _scrollController,
-                        reverse: true,
-                        children: core.connection.lastLogEntries
-                            .map(
-                              (action) => Text.rich(
-                                TextSpan(
-                                  children: [
-                                    TextSpan(
-                                      text: action.date.toString().split(" ").last,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontFeatures: [FontFeature.tabularFigures()],
-                                        fontFamily: "monospace",
-                                        fontFamilyFallback: <String>["Courier"],
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: Text.rich(
+                            TextSpan(
+                              children: core.connection.lastLogEntries
+                                  .map(
+                                    (action) => [
+                                      TextSpan(
+                                        text: action.date.toString().split(" ").last,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontFeatures: [FontFeature.tabularFigures()],
+                                          fontFamily: "monospace",
+                                          fontFamilyFallback: <String>["Courier"],
+                                        ),
                                       ),
-                                    ),
-                                    TextSpan(
-                                      text: "  ${action.entry}",
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontFeatures: [FontFeature.tabularFigures()],
-                                        fontWeight: FontWeight.bold,
+                                      TextSpan(
+                                        text: "  ${action.entry}\n",
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontFeatures: [FontFeature.tabularFigures()],
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                            .toList(),
+                                    ],
+                                  )
+                                  .flatten()
+                                  .toList(),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
 
-          if (!kIsWeb) ...[
-            Text(context.i18n.logsAreAlsoAt).muted.small,
-            CodeSnippet(
-              code: SelectableText(File('${Directory.current.path}/app.logs').path),
-              actions: [
-                IconButton(
-                  icon: Icon(Icons.copy),
-                  variance: ButtonVariance.outline,
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: File('${Directory.current.path}/app.logs').path));
-                    buildToast(context, title: context.i18n.pathCopiedToClipboard);
-                  },
-                ),
-              ],
+          if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux))
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0),
+              child: Row(
+                children: [
+                  Text('Logs file: '),
+                  SelectableText('${Directory.current.path}/app.log').inlineCode,
+                ],
+              ).small,
             ),
-          ],
         ],
       ),
     );
