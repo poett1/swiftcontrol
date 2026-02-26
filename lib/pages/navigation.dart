@@ -1,21 +1,22 @@
 import 'dart:io';
 
+import 'package:bike_control/gen/l10n.dart';
+import 'package:bike_control/main.dart';
+import 'package:bike_control/pages/customize.dart';
+import 'package:bike_control/pages/device.dart';
+import 'package:bike_control/pages/trainer.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/i18n_extension.dart';
+import 'package:bike_control/widgets/logviewer.dart';
+import 'package:bike_control/widgets/menu.dart';
+import 'package:bike_control/widgets/title.dart';
+import 'package:bike_control/widgets/ui/colors.dart';
+import 'package:bike_control/widgets/ui/help_button.dart';
 import 'package:dartx/dartx.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
-import 'package:swift_control/gen/l10n.dart';
-import 'package:swift_control/main.dart';
-import 'package:swift_control/pages/customize.dart';
-import 'package:swift_control/pages/device.dart';
-import 'package:swift_control/pages/trainer.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/i18n_extension.dart';
-import 'package:swift_control/widgets/logviewer.dart';
-import 'package:swift_control/widgets/menu.dart';
-import 'package:swift_control/widgets/title.dart';
-import 'package:swift_control/widgets/ui/colors.dart';
 
 import '../widgets/changelog_dialog.dart';
 
@@ -51,13 +52,19 @@ class _NavigationState extends State<Navigation> {
   bool _isMobile = false;
   late BCPage _selectedPage;
 
+  final Map<BCPage, Key> _pageKeys = {
+    BCPage.devices: Key('devices_page'),
+    BCPage.trainer: Key('trainer_page'),
+    BCPage.customization: Key('customization_page'),
+    BCPage.logs: Key('logs_page'),
+  };
+
   @override
   void initState() {
     super.initState();
 
     _selectedPage = widget.page;
 
-    core.connection.initialize();
     core.logic.startEnabledConnectionMethod();
 
     core.connection.actionStream.listen((_) {
@@ -127,26 +134,43 @@ class _NavigationState extends State<Navigation> {
   Widget build(BuildContext context) {
     return Scaffold(
       headers: [
-        AppBar(
-          padding:
-              const EdgeInsets.only(top: 12, bottom: 8, left: 12, right: 12) *
-              (screenshotMode ? 2 : Theme.of(context).scaling),
-          title: AppTitle(),
-          backgroundColor: Theme.of(context).colorScheme.background,
-          trailing: buildMenuButtons(
-            context,
-            _isMobile
-                ? () {
-                    setState(() {
-                      _selectedPage = BCPage.logs;
-                    });
-                  }
-                : null,
-          ),
+        Stack(
+          children: [
+            AppBar(
+              padding:
+                  const EdgeInsets.only(top: 12, bottom: 8, left: 12, right: 12) *
+                  (screenshotMode ? 2 : Theme.of(context).scaling),
+              title: AppTitle(),
+              backgroundColor: Theme.of(context).colorScheme.background,
+              trailing: buildMenuButtons(
+                context,
+                _selectedPage,
+                _isMobile
+                    ? () {
+                        setState(() {
+                          _selectedPage = BCPage.logs;
+                        });
+                      }
+                    : null,
+              ),
+            ),
+            if (!_isMobile)
+              Container(
+                alignment: Alignment.topCenter,
+                child: HelpButton(isMobile: false),
+              ),
+          ],
         ),
         Divider(),
       ],
-      footers: _isMobile ? [Divider(), _buildNavigationBar()] : [],
+      footers: _isMobile
+          ? [
+              if (_isMobile) Center(child: HelpButton(isMobile: true)),
+              Divider(),
+              _buildNavigationBar(),
+            ]
+          : [],
+      floatingFooter: true,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -155,19 +179,25 @@ class _NavigationState extends State<Navigation> {
             VerticalDivider(),
           ],
           Expanded(
-            child: Container(
-              alignment: Alignment.topLeft,
-              child: AnimatedSwitcher(
-                duration: Duration(milliseconds: 200),
-                child: switch (_selectedPage) {
-                  BCPage.devices => DevicePage(
+            child: AnimatedSwitcher(
+              duration: Duration(milliseconds: 200),
+              child: switch (_selectedPage) {
+                BCPage.devices => Align(
+                  alignment: Alignment.topLeft,
+                  key: _pageKeys[BCPage.devices],
+                  child: DevicePage(
+                    isMobile: _isMobile,
                     onUpdate: () {
                       setState(() {
                         _selectedPage = BCPage.trainer;
                       });
                     },
                   ),
-                  BCPage.trainer => TrainerPage(
+                ),
+                BCPage.trainer => Align(
+                  alignment: Alignment.topLeft,
+                  key: _pageKeys[BCPage.trainer],
+                  child: TrainerPage(
                     onUpdate: () {
                       setState(() {});
                     },
@@ -176,11 +206,21 @@ class _NavigationState extends State<Navigation> {
                         _selectedPage = BCPage.customization;
                       });
                     },
+                    isMobile: _isMobile,
                   ),
-                  BCPage.customization => CustomizePage(),
-                  BCPage.logs => LogViewer(),
-                },
-              ),
+                ),
+                BCPage.customization => Align(
+                  alignment: Alignment.topLeft,
+                  key: _pageKeys[BCPage.customization],
+                  child: CustomizePage(isMobile: _isMobile),
+                ),
+                BCPage.logs => Padding(
+                  padding: EdgeInsets.only(bottom: _isMobile ? 146 : 16, left: 16, right: 16, top: 16),
+                  child: LogViewer(
+                    key: _pageKeys[BCPage.logs],
+                  ),
+                ),
+              },
             ),
           ),
         ],
@@ -249,7 +289,7 @@ class _NavigationState extends State<Navigation> {
               reverseDuration: Duration(seconds: 1),
               start: 10,
               end: 12,
-              mode: RepeatMode.pingPong,
+              mode: LoopingMode.pingPong,
               builder: (context, value, child) {
                 return Container(
                   width: value,

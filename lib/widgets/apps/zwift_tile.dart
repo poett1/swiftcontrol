@@ -1,9 +1,10 @@
+import 'package:bike_control/bluetooth/messages/notification.dart';
+import 'package:bike_control/main.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/i18n_extension.dart';
+import 'package:bike_control/widgets/ui/connection_method.dart';
 import 'package:flutter/material.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pbenum.dart';
-import 'package:swift_control/bluetooth/messages/notification.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/i18n_extension.dart';
-import 'package:swift_control/widgets/ui/connection_method.dart';
+import 'package:prop/prop.dart';
 
 class ZwiftTile extends StatefulWidget {
   final VoidCallback onUpdate;
@@ -26,6 +27,7 @@ class _ZwiftTileState extends State<ZwiftTile> {
             return StatefulBuilder(
               builder: (context, setState) {
                 return ConnectionMethod(
+                  supportedActions: core.zwiftEmulator.supportedActions,
                   isEnabled: core.settings.getZwiftBleEmulatorEnabled(),
                   type: ConnectionMethodType.bluetooth,
                   instructionLink: 'INSTRUCTIONS_ZWIFT.md',
@@ -36,7 +38,9 @@ class _ZwiftTileState extends State<ZwiftTile> {
                     if (!value) {
                       core.zwiftEmulator.stopAdvertising();
                     } else if (value) {
-                      core.zwiftEmulator.startAdvertising(widget.onUpdate).catchError((e) {
+                      core.zwiftEmulator.startAdvertising(widget.onUpdate).catchError((e, s) {
+                        recordError(e, s, context: 'Zwift BLE Emulator');
+                        core.zwiftEmulator.cleanup();
                         core.zwiftEmulator.isStarted.value = false;
                         core.settings.setZwiftBleEmulatorEnabled(false);
                         core.connection.signalNotification(AlertNotification(LogLevel.LOGLEVEL_ERROR, e.toString()));

@@ -1,10 +1,12 @@
+import 'package:bike_control/gen/l10n.dart';
+import 'package:bike_control/main.dart';
+import 'package:bike_control/pages/markdown.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/i18n_extension.dart';
+import 'package:bike_control/widgets/ui/connection_method.dart';
+import 'package:bike_control/widgets/ui/toast.dart';
+import 'package:prop/prop.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pb.dart';
-import 'package:swift_control/gen/l10n.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/i18n_extension.dart';
-import 'package:swift_control/widgets/ui/connection_method.dart';
-import 'package:swift_control/widgets/ui/toast.dart';
 
 class MyWhooshLinkTile extends StatefulWidget {
   const MyWhooshLinkTile({super.key});
@@ -23,6 +25,7 @@ class _MywhooshLinkTileState extends State<MyWhooshLinkTile> {
           valueListenable: core.whooshLink.isConnected,
           builder: (context, isConnected, _) {
             return ConnectionMethod(
+              supportedActions: core.whooshLink.supportedActions,
               isEnabled: core.settings.getMyWhooshLinkEnabled(),
               type: ConnectionMethodType.network,
               title: context.i18n.connectUsingMyWhooshLink,
@@ -40,15 +43,22 @@ class _MywhooshLinkTileState extends State<MyWhooshLinkTile> {
                   core.whooshLink.stopServer();
                 } else if (value) {
                   buildToast(
-                    context,
                     title: AppLocalizations.of(context).myWhooshLinkInfo,
-                    level: LogLevel.LOGLEVEL_WARNING,
-                    duration: Duration(seconds: 12),
+                    level: LogLevel.LOGLEVEL_INFO,
+                    duration: Duration(seconds: 6),
+                    closeTitle: 'Open',
+                    onClose: () {
+                      openDrawer(
+                        context: context,
+                        position: OverlayPosition.bottom,
+                        builder: (c) => MarkdownPage(assetPath: 'INSTRUCTIONS_MYWHOOSH_LINK.md'),
+                      );
+                    },
                   );
-                  core.connection.startMyWhooshServer().catchError((e) {
+                  core.connection.startMyWhooshServer().catchError((e, s) {
+                    recordError(e, s, context: 'MyWhoosh Link Server');
                     core.settings.setMyWhooshLinkEnabled(false);
                     buildToast(
-                      context,
                       title: context.i18n.errorStartingMyWhooshLink,
                     );
                   });

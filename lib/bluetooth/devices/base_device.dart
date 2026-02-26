@@ -1,25 +1,43 @@
 import 'dart:async';
 
+import 'package:bike_control/bluetooth/devices/zwift/constants.dart';
+import 'package:bike_control/gen/l10n.dart';
+import 'package:bike_control/main.dart';
+import 'package:bike_control/utils/actions/desktop.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/iap/iap_manager.dart';
+import 'package:bike_control/utils/keymap/apps/custom_app.dart';
+import 'package:bike_control/utils/keymap/manager.dart';
 import 'package:dartx/dartx.dart';
 import 'package:flutter/material.dart';
-import 'package:swift_control/bluetooth/devices/zwift/constants.dart';
-import 'package:swift_control/utils/actions/desktop.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/keymap/apps/custom_app.dart';
-import 'package:swift_control/utils/keymap/manager.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:prop/prop.dart' show LogLevel;
 
 import '../../utils/keymap/buttons.dart';
 import '../messages/notification.dart';
 
 abstract class BaseDevice {
-  final String name;
+  final String? _name;
   final bool isBeta;
+  final String uniqueId;
   final List<ControllerButton> availableButtons;
 
-  BaseDevice(this.name, {required this.availableButtons, this.isBeta = false}) {
+  BaseDevice(
+    this._name, {
+    required this.uniqueId,
+    required this.availableButtons,
+    this.isBeta = false,
+    String? buttonPrefix,
+  }) {
     if (availableButtons.isEmpty && core.actionHandler.supportedApp is CustomApp) {
-      // TODO we should verify where the buttons came from
-      final allButtons = core.actionHandler.supportedApp!.keymap.keyPairs.flatMap((e) => e.buttons);
+      final allButtons = core.actionHandler.supportedApp!.keymap.keyPairs
+          .flatMap((e) => e.buttons)
+          .filter(
+            (e) =>
+                e.sourceDeviceId == uniqueId ||
+                (e.sourceDeviceId == null && buttonPrefix != null && e.name.startsWith(buttonPrefix)),
+          )
+          .toSet();
       availableButtons.addAll(allButtons);
     }
   }
@@ -29,17 +47,20 @@ abstract class BaseDevice {
   Timer? _longPressTimer;
   Set<ControllerButton> _previouslyPressedButtons = <ControllerButton>{};
 
+  String get name => _name ?? runtimeType.toString();
+
+  String get buttonExplanation => isConnected ? 'Connecting...' : 'Click a button on this device to configure them.';
+
   @override
   bool operator ==(Object other) =>
-      identical(this, other) || other is BaseDevice && runtimeType == other.runtimeType && name == other.name;
+      identical(this, other) ||
+      other is BaseDevice && runtimeType == other.runtimeType && toString() == other.toString();
 
   @override
   int get hashCode => name.hashCode;
 
   @override
-  String toString() {
-    return name;
-  }
+  String toString() => name;
 
   final StreamController<BaseNotification> actionStreamInternal = StreamController<BaseNotification>.broadcast();
 
@@ -47,9 +68,32 @@ abstract class BaseDevice {
 
   Future<void> connect();
 
-  Future<void> handleButtonsClicked(List<ControllerButton>? buttonsClicked) async {
+  Future<void> handleButtonsClickedWithoutLongPressSupport(List<ControllerButton> clickedButtons) async {
+    if (clickedButtons.length == 1) {
+      final keyPair = core.actionHandler.supportedApp?.keymap.getKeyPair(clickedButtons.single);
+      if (keyPair != null && (keyPair.isLongPress || keyPair.inGameAction?.isLongPress == true)) {
+        // For long press actions: perform down, wait, then release
+        await handleButtonsClicked(clickedButtons, longPress: true);
+        _longPressTimer?.cancel();
+        await Future.delayed(const Duration(milliseconds: 800));
+        await handleButtonsClicked([], longPress: true);
+      } else {
+        // For non-long-press actions: perform a single click
+        // First call performs the click action (isKeyDown: true, isKeyUp: true)
+        await handleButtonsClicked(clickedButtons);
+        // Second call cleans up state (clears timer, logs release, clears _previouslyPressedButtons)
+        // but doesn't perform a release action since longPress: false
+        await handleButtonsClicked([]);
+      }
+    } else {
+      await handleButtonsClicked(clickedButtons);
+      await handleButtonsClicked([]);
+    }
+  }
+
+  Future<void> handleButtonsClicked(List<ControllerButton>? buttonsClicked, {bool longPress = false}) async {
     try {
-      await _handleButtonsClickedInternal(buttonsClicked);
+      await _handleButtonsClickedInternal(buttonsClicked, longPress: longPress);
     } catch (e, st) {
       actionStreamInternal.add(
         LogNotification('Error handling button clicks: $e\n$st'),
@@ -57,7 +101,7 @@ abstract class BaseDevice {
     }
   }
 
-  Future<void> _handleButtonsClickedInternal(List<ControllerButton>? buttonsClicked) async {
+  Future<void> _handleButtonsClickedInternal(List<ControllerButton>? buttonsClicked, {required bool longPress}) async {
     if (buttonsClicked == null) {
       // ignore, no changes
     } else if (buttonsClicked.isEmpty) {
@@ -67,8 +111,9 @@ abstract class BaseDevice {
       // Handle release events for long press keys
       final buttonsReleased = _previouslyPressedButtons.toList();
       final isLongPress =
+          longPress ||
           buttonsReleased.singleOrNull != null &&
-          core.actionHandler.supportedApp?.keymap.getKeyPair(buttonsReleased.single)?.isLongPress == true;
+              core.actionHandler.supportedApp?.keymap.getKeyPair(buttonsReleased.single)?.isLongPress == true;
       if (buttonsReleased.isNotEmpty && isLongPress) {
         await performRelease(buttonsReleased);
       }
@@ -79,15 +124,17 @@ abstract class BaseDevice {
       // Handle release events for buttons that are no longer pressed
       final buttonsReleased = _previouslyPressedButtons.difference(buttonsClicked.toSet()).toList();
       final wasLongPress =
+          longPress ||
           buttonsReleased.singleOrNull != null &&
-          core.actionHandler.supportedApp?.keymap.getKeyPair(buttonsReleased.single)?.isLongPress == true;
+              core.actionHandler.supportedApp?.keymap.getKeyPair(buttonsReleased.single)?.isLongPress == true;
       if (buttonsReleased.isNotEmpty && wasLongPress) {
         await performRelease(buttonsReleased);
       }
 
       final isLongPress =
+          longPress ||
           buttonsClicked.singleOrNull != null &&
-          core.actionHandler.supportedApp?.keymap.getKeyPair(buttonsClicked.single)?.isLongPress == true;
+              core.actionHandler.supportedApp?.keymap.getKeyPair(buttonsClicked.single)?.isLongPress == true;
 
       if (!isLongPress &&
           !(buttonsClicked.singleOrNull == ZwiftButtons.onOffLeft ||
@@ -109,16 +156,46 @@ abstract class BaseDevice {
     }
   }
 
+  String _getCommandLimitMessage() {
+    return AppLocalizations.current.dailyCommandLimitReachedNotification;
+  }
+
+  String _getCommandLimitTitle() {
+    return AppLocalizations.current
+        .dailyLimitReached(IAPManager.dailyCommandLimit, IAPManager.dailyCommandLimit)
+        .replaceAll(
+          '${IAPManager.dailyCommandLimit}/${IAPManager.dailyCommandLimit}',
+          IAPManager.dailyCommandLimit.toString(),
+        )
+        .replaceAll(
+          '${IAPManager.dailyCommandLimit} / ${IAPManager.dailyCommandLimit}',
+          IAPManager.dailyCommandLimit.toString(),
+        );
+  }
+
   Future<void> performDown(List<ControllerButton> buttonsClicked) async {
     for (final action in buttonsClicked) {
+      // Check IAP status before executing command
+      if (!IAPManager.instance.canExecuteCommand) {
+        //actionStreamInternal.add(AlertNotification(LogLevel.LOGLEVEL_ERROR, _getCommandLimitMessage()));
+        continue;
+      }
+
       // For repeated actions, don't trigger key down/up events (useful for long press)
       final result = await core.actionHandler.performAction(action, isKeyDown: true, isKeyUp: false);
-      actionStreamInternal.add(LogNotification(result.message));
+
+      actionStreamInternal.add(ActionNotification(result));
     }
   }
 
   Future<void> performClick(List<ControllerButton> buttonsClicked) async {
     for (final action in buttonsClicked) {
+      // Check IAP status before executing command
+      if (!IAPManager.instance.canExecuteCommand) {
+        _showCommandLimitAlert();
+        continue;
+      }
+
       final result = await core.actionHandler.performAction(action, isKeyDown: true, isKeyUp: true);
       actionStreamInternal.add(ActionNotification(result));
     }
@@ -126,8 +203,14 @@ abstract class BaseDevice {
 
   Future<void> performRelease(List<ControllerButton> buttonsReleased) async {
     for (final action in buttonsReleased) {
+      // Check IAP status before executing command
+      if (!IAPManager.instance.canExecuteCommand) {
+        _showCommandLimitAlert();
+        continue;
+      }
+
       final result = await core.actionHandler.performAction(action, isKeyDown: false, isKeyUp: true);
-      actionStreamInternal.add(ActionNotification(result));
+      actionStreamInternal.add(LogNotification(result.message));
     }
   }
 
@@ -144,17 +227,46 @@ abstract class BaseDevice {
   Widget showInformation(BuildContext context);
 
   ControllerButton getOrAddButton(String key, ControllerButton Function() creator) {
+    if (core.actionHandler.supportedApp == null) {
+      return creator();
+    }
     if (core.actionHandler.supportedApp is! CustomApp) {
       final currentProfile = core.actionHandler.supportedApp!.name;
       // should we display this to the user?
       KeymapManager().duplicateSync(currentProfile, '$currentProfile (Copy)');
     }
-    final button = core.actionHandler.supportedApp!.keymap.getOrAddButton(key, creator);
+    var createdButton = creator();
+    if (createdButton.sourceDeviceId == null) {
+      createdButton = createdButton.copyWith(sourceDeviceId: uniqueId);
+    }
+    final button = core.actionHandler.supportedApp!.keymap.getOrAddButton(key, createdButton);
 
     if (availableButtons.none((e) => e.name == button.name)) {
       availableButtons.add(button);
       core.settings.setKeyMap(core.actionHandler.supportedApp!);
     }
     return button;
+  }
+
+  void _showCommandLimitAlert() {
+    actionStreamInternal.add(
+      AlertNotification(
+        LogLevel.LOGLEVEL_ERROR,
+        _getCommandLimitMessage(),
+        buttonTitle: AppLocalizations.current.purchase,
+        onTap: () {
+          IAPManager.instance.purchaseFullVersion(navigatorKey.currentContext!);
+        },
+      ),
+    );
+    core.flutterLocalNotificationsPlugin.show(
+      1337,
+      _getCommandLimitTitle(),
+      _getCommandLimitMessage(),
+      NotificationDetails(
+        android: AndroidNotificationDetails('Limit', 'Limit reached'),
+        iOS: DarwinNotificationDetails(presentAlert: true),
+      ),
+    );
   }
 }

@@ -2,17 +2,17 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:bike_control/bluetooth/messages/notification.dart';
+import 'package:bike_control/gen/l10n.dart';
+import 'package:bike_control/pages/onboarding.dart';
+import 'package:bike_control/utils/actions/android.dart';
+import 'package:bike_control/utils/actions/desktop.dart';
+import 'package:bike_control/utils/actions/remote.dart';
+import 'package:bike_control/widgets/menu.dart';
+import 'package:bike_control/widgets/testbed.dart';
+import 'package:bike_control/widgets/ui/colors.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_localizations/flutter_localizations.dart'
-    show GlobalMaterialLocalizations, GlobalWidgetsLocalizations;
 import 'package:shadcn_flutter/shadcn_flutter.dart';
-import 'package:swift_control/gen/l10n.dart';
-import 'package:swift_control/utils/actions/android.dart';
-import 'package:swift_control/utils/actions/desktop.dart';
-import 'package:swift_control/utils/actions/remote.dart';
-import 'package:swift_control/widgets/menu.dart';
-import 'package:swift_control/widgets/testbed.dart';
-import 'package:swift_control/widgets/ui/colors.dart';
 
 import 'pages/navigation.dart';
 import 'utils/actions/base_actions.dart';
@@ -31,7 +31,7 @@ void main() async {
         final List<dynamic> errorAndStack = pair as List<dynamic>;
         final error = errorAndStack.first;
         final stack = errorAndStack.last as StackTrace?;
-        _recordError(error, stack, context: 'Isolate');
+        recordError(error, stack, context: 'Isolate');
       }).sendPort,
     );
   }
@@ -47,7 +47,7 @@ void main() async {
 
       // Catch errors from platform dispatcher (async)
       PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-        _recordError(error, stack, context: 'PlatformDispatcher');
+        recordError(error, stack, context: 'PlatformDispatcher');
         // Return true means "handled"
         return true;
       };
@@ -63,7 +63,7 @@ void main() async {
         print('App crashed: $error');
         debugPrintStack(stackTrace: stack);
       }
-      _recordError(error, stack, context: 'Zone');
+      recordError(error, stack, context: 'Zone');
     },
   );
 }
@@ -77,7 +77,7 @@ Future<void> _recordFlutterError(FlutterErrorDetails details) async {
   );
 }
 
-Future<void> _recordError(
+Future<void> recordError(
   Object error,
   StackTrace? stack, {
   required String context,
@@ -104,23 +104,25 @@ Future<void> _persistCrash({
       ..writeln('Error: $error')
       ..writeln('Stack: ${stack ?? 'no stack'}')
       ..writeln('Info: ${information ?? ''}')
-      ..writeln(debugText())
+      ..writeln(await debugText())
       ..writeln()
       ..writeln();
 
     final directory = await _getLogDirectory();
-    final file = File('${directory.path}/app.logs');
-    final fileLength = await file.length();
-    if (fileLength > 5 * 1024 * 1024) {
-      // If log file exceeds 5MB, truncate it
-      final lines = await file.readAsLines();
-      final half = lines.length ~/ 2;
-      final truncatedLines = lines.sublist(half);
-      await file.writeAsString(truncatedLines.join('\n'));
+    final file = File('${directory.path}/app.log');
+    if (file.existsSync()) {
+      final fileLength = await file.length();
+      if (fileLength > 5 * 1024 * 1024) {
+        // If log file exceeds 5MB, truncate it
+        final lines = await file.readAsLines();
+        final half = lines.length ~/ 2;
+        final truncatedLines = lines.sublist(half);
+        await file.writeAsString(truncatedLines.join('\n'));
+      }
     }
 
     await file.writeAsString(crashData.toString(), mode: FileMode.append);
-    core.connection.lastLogEntries.add((date: DateTime.now(), entry: 'App crashed: $error'));
+    core.connection.signalNotification(LogNotification('App crashed: $error'));
   } catch (_) {
     // Avoid throwing from the crash logger
   }
@@ -164,10 +166,18 @@ void initializeActions(ConnectionType connectionType) {
   core.actionHandler.init(core.settings.getKeyMap());
 }
 
-class BikeControlApp extends StatelessWidget {
+class BikeControlApp extends StatefulWidget {
+  final Widget? customChild;
   final BCPage page;
   final String? error;
-  const BikeControlApp({super.key, this.error, this.page = BCPage.devices});
+  const BikeControlApp({super.key, this.error, this.page = BCPage.devices, this.customChild});
+
+  @override
+  State<BikeControlApp> createState() => _BikeControlAppState();
+}
+
+class _BikeControlAppState extends State<BikeControlApp> {
+  BCPage? _showPage;
 
   @override
   Widget build(BuildContext context) {
@@ -175,11 +185,11 @@ class BikeControlApp extends StatelessWidget {
     return ShadcnApp(
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
-      menuHandler: PopoverOverlayHandler(),
-      popoverHandler: PopoverOverlayHandler(),
+      menuHandler: OverlayHandler.popover,
+      popoverHandler: OverlayHandler.popover,
       localizationsDelegates: [
-        ...GlobalMaterialLocalizations.delegates,
-        GlobalWidgetsLocalizations.delegate,
+        ...ShadcnLocalizations.localizationsDelegates,
+        OtherLocalizationsDelegate(),
         AppLocalizations.delegate,
       ],
       supportedLocales: AppLocalizations.delegate.supportedLocales,
@@ -197,23 +207,79 @@ class BikeControlApp extends StatelessWidget {
         ),
       ),
       //themeMode: ThemeMode.dark,
-      home: error != null
+      home: widget.error != null
           ? Center(
               child: Text(
-                'There was an error starting the App. Please contact support:\n$error',
+                'There was an error starting the App. Please contact support:\n${widget.error}',
                 style: TextStyle(color: Colors.white),
               ),
             )
           : ToastLayer(
               key: ValueKey('Test'),
               padding: isMobile ? EdgeInsets.only(bottom: 60, left: 24, right: 24, top: 60) : null,
-              child: Stack(
-                children: [
-                  Navigation(page: page),
-                  Positioned.fill(child: Testbed()),
-                ],
+              child: _Starter(
+                child: Stack(
+                  children: [
+                    widget.customChild ??
+                        (AnimatedSwitcher(
+                          duration: Duration(milliseconds: 600),
+                          child: core.settings.getShowOnboarding()
+                              ? OnboardingPage(
+                                  onComplete: () {
+                                    setState(() {
+                                      if (core.obpMdnsEmulator.connectedApp.value == null) {
+                                        _showPage = BCPage.trainer;
+                                      } else {
+                                        _showPage = BCPage.devices;
+                                      }
+                                    });
+                                  },
+                                )
+                              : Navigation(page: _showPage ?? widget.page),
+                        )),
+                    Positioned.fill(child: Testbed()),
+                  ],
+                ),
               ),
             ),
     );
   }
+}
+
+class _Starter extends StatefulWidget {
+  final Widget child;
+  const _Starter({super.key, required this.child});
+
+  @override
+  State<_Starter> createState() => _StarterState();
+}
+
+class _StarterState extends State<_Starter> {
+  @override
+  void initState() {
+    super.initState();
+
+    core.connection.initialize();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
+  }
+}
+
+class OtherLocalizationsDelegate extends LocalizationsDelegate<ShadcnLocalizations> {
+  const OtherLocalizationsDelegate();
+
+  @override
+  bool isSupported(Locale locale) =>
+      AppLocalizations.delegate.supportedLocales.map((e) => e.languageCode).contains(locale.languageCode);
+
+  @override
+  Future<ShadcnLocalizations> load(Locale locale) async {
+    return SynchronousFuture<ShadcnLocalizations>(lookupShadcnLocalizations(Locale('en')));
+  }
+
+  @override
+  bool shouldReload(covariant LocalizationsDelegate<ShadcnLocalizations> old) => false;
 }

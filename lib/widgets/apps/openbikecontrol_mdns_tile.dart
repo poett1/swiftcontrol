@@ -1,9 +1,11 @@
+import 'package:prop/prop.dart';
+import 'package:bike_control/bluetooth/messages/notification.dart';
+import 'package:bike_control/main.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/i18n_extension.dart';
+import 'package:bike_control/widgets/ui/connection_method.dart';
+import 'package:dartx/dartx.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pb.dart';
-import 'package:swift_control/bluetooth/messages/notification.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/i18n_extension.dart';
-import 'package:swift_control/widgets/ui/connection_method.dart';
 
 class OpenBikeControlMdnsTile extends StatefulWidget {
   const OpenBikeControlMdnsTile({super.key});
@@ -22,12 +24,15 @@ class _OpenBikeProtocolTileState extends State<OpenBikeControlMdnsTile> {
           valueListenable: core.obpMdnsEmulator.connectedApp,
           builder: (context, isConnected, _) {
             return ConnectionMethod(
+              supportedActions: isConnected?.supportedActions,
               isEnabled: core.settings.getObpMdnsEnabled(),
               type: ConnectionMethodType.openBikeControl,
               title: context.i18n.connectDirectlyOverNetwork,
 
               description: isConnected != null
-                  ? context.i18n.connectedTo(isConnected.appId)
+                  ? context.i18n.connectedTo(
+                      "${isConnected.appId}:\n${isConnected.supportedActions.joinToString(transform: (s) => s.title)}",
+                    )
                   : isStarted
                   ? context.i18n.chooseBikeControlInConnectionScreen
                   : context.i18n.letsAppConnectOverNetwork(core.settings.getTrainerApp()?.name ?? ''),
@@ -37,7 +42,8 @@ class _OpenBikeProtocolTileState extends State<OpenBikeControlMdnsTile> {
                 if (!value) {
                   core.obpMdnsEmulator.stopServer();
                 } else if (value) {
-                  core.obpMdnsEmulator.startServer().catchError((e) {
+                  core.obpMdnsEmulator.startServer().catchError((e, s) {
+                    recordError(e, s, context: 'OBP mDNS Emulator');
                     core.settings.setObpMdnsEnabled(false);
                     core.connection.signalNotification(
                       AlertNotification(

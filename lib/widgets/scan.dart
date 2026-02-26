@@ -1,14 +1,11 @@
-import 'dart:io';
-
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/i18n_extension.dart';
+import 'package:bike_control/widgets/ui/connection_method.dart';
+import 'package:bike_control/widgets/ui/wifi_animation.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
-import 'package:swift_control/pages/markdown.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/i18n_extension.dart';
-import 'package:swift_control/utils/requirements/platform.dart';
-import 'package:swift_control/widgets/ui/connection_method.dart';
-import 'package:swift_control/widgets/ui/wifi_animation.dart';
-import 'package:url_launcher/url_launcher_string.dart';
+
+import '../utils/requirements/platform.dart';
 
 class ScanWidget extends StatefulWidget {
   const ScanWidget({super.key});
@@ -32,6 +29,7 @@ class _ScanWidgetState extends State<ScanWidget> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.start,
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
         if (_needsPermissions != null && _needsPermissions!.isNotEmpty)
           Card(
@@ -40,7 +38,7 @@ class _ScanWidgetState extends State<ScanWidget> {
                 spacing: 8,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(context.i18n.permissionsRequired),
+                  Text(context.i18n.permissionsRequired).xSmall,
                   ..._needsPermissions!.map((e) => Text(e.name).li),
                 ],
               ),
@@ -66,55 +64,19 @@ class _ScanWidgetState extends State<ScanWidget> {
                   mainAxisAlignment: MainAxisAlignment.start,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(),
-                    Row(
-                      spacing: 14,
-                      children: [
-                        SizedBox(),
-                        SmoothWifiAnimation(),
-                        Expanded(
-                          child: Text(context.i18n.scanningForDevices).small.muted,
-                        ),
-                      ],
-                    ),
-                    if (!kIsWeb && (Platform.isMacOS || Platform.isWindows))
-                      ValueListenableBuilder(
-                        valueListenable: core.mediaKeyHandler.isMediaKeyDetectionEnabled,
-                        builder: (context, value, child) {
-                          return Tooltip(
-                            tooltip: (c) => TooltipContainer(
-                              child: Text(context.i18n.mediaKeyDetectionTooltip),
-                            ),
-                            child: Checkbox(
-                              state: value ? CheckboxState.checked : CheckboxState.unchecked,
-                              trailing: Text(context.i18n.enableMediaKeyDetection),
-                              onChanged: (change) {
-                                core.mediaKeyHandler.isMediaKeyDetectionEnabled.value = change == CheckboxState.checked;
-                              },
-                            ),
-                          );
-                        },
+                    if (core.connection.controllerDevices.isEmpty)
+                      Column(
+                        spacing: 14,
+                        children: [
+                          SizedBox(),
+                          SmoothWifiAnimation(),
+                          Text(
+                            context.i18n.scanningForDevices,
+                            textAlign: TextAlign.center,
+                          ).small.muted,
+                        ],
                       ),
                     SizedBox(),
-                    if (core.connection.controllerDevices.isEmpty) ...[
-                      OutlineButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (c) => MarkdownPage(assetPath: 'TROUBLESHOOTING.md')),
-                          );
-                        },
-                        child: Text(context.i18n.showTroubleshootingGuide),
-                      ),
-                      OutlineButton(
-                        onPressed: () {
-                          launchUrlString(
-                            'https://github.com/jonasbark/swiftcontrol/?tab=readme-ov-file#supported-devices',
-                          );
-                        },
-                        child: Text(context.i18n.showSupportedControllers),
-                      ),
-                    ],
                   ],
                 );
               } else {

@@ -1,32 +1,39 @@
 import 'dart:io';
 
+import 'package:bike_control/bluetooth/devices/openbikecontrol/obc_dircon.dart';
+import 'package:bike_control/bluetooth/devices/openbikecontrol/openbikecontrol_device.dart';
+import 'package:bike_control/bluetooth/devices/openbikecontrol/protocol_parser.dart';
+import 'package:bike_control/bluetooth/devices/trainer_connection.dart';
+import 'package:bike_control/bluetooth/messages/notification.dart';
+import 'package:bike_control/utils/actions/base_actions.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/keymap/apps/supported_app.dart';
+import 'package:bike_control/utils/keymap/buttons.dart';
+import 'package:bike_control/utils/keymap/keymap.dart';
 import 'package:dartx/dartx.dart';
 import 'package:flutter/foundation.dart';
 import 'package:nsd/nsd.dart';
-import 'package:swift_control/bluetooth/devices/openbikecontrol/openbikecontrol_device.dart';
-import 'package:swift_control/bluetooth/devices/openbikecontrol/protocol_parser.dart';
-import 'package:swift_control/bluetooth/devices/trainer_connection.dart';
-import 'package:swift_control/bluetooth/devices/zwift/ftms_mdns_emulator.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pb.dart';
-import 'package:swift_control/bluetooth/messages/notification.dart';
-import 'package:swift_control/utils/actions/base_actions.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/keymap/buttons.dart';
-import 'package:swift_control/utils/keymap/keymap.dart';
+import 'package:prop/prop.dart';
 
-class OpenBikeControlMdnsEmulator extends TrainerConnection {
+class OpenBikeControlMdnsEmulator extends TrainerConnection implements OnMessage {
   ServerSocket? _server;
   Registration? _mdnsRegistration;
+
+  static const String connectionTitle = 'OpenBikeControl mDNS Emulator';
 
   final ValueNotifier<AppInfo?> connectedApp = ValueNotifier(null);
 
   Socket? _socket;
+  ObcDircon? _dirCon;
 
   OpenBikeControlMdnsEmulator()
     : super(
-        title: 'OpenBikeControl mDNS Emulator',
+        title: connectionTitle,
         supportedActions: InGameAction.values,
       );
+
+  bool get _useDirCon =>
+      core.settings.getTrainerApp()?.supportsOpenBikeProtocol.contains(OpenBikeProtocolSupport.dircon) ?? false;
 
   Future<void> startServer() async {
     print('Starting mDNS server...');
@@ -50,7 +57,7 @@ class OpenBikeControlMdnsEmulator extends TrainerConnection {
       throw 'Could not find network interface';
     }
 
-    _createTcpServer();
+    await _createTcpServer();
 
     if (kDebugMode) {
       enableLogging(LogTopic.calls);
@@ -63,18 +70,23 @@ class OpenBikeControlMdnsEmulator extends TrainerConnection {
       _mdnsRegistration = await register(
         Service(
           name: 'BikeControl',
-          type: '_openbikecontrol._tcp',
+          type: _useDirCon ? '_wahoo-fitness-tnp._tcp' : '_openbikecontrol._tcp',
           port: 36867,
-          //hostName: 'KICKR BIKE SHIFT B84D.local',
           addresses: [localIP],
-          txt: {
-            'version': Uint8List.fromList([0x01]),
-            'id': Uint8List.fromList('1337'.codeUnits),
-            'name': Uint8List.fromList('BikeControl'.codeUnits),
-            'service-uuids': Uint8List.fromList(OpenBikeControlConstants.SERVICE_UUID.codeUnits),
-            'manufacturer': Uint8List.fromList('OpenBikeControl'.codeUnits),
-            'model': Uint8List.fromList('BikeControl app'.codeUnits),
-          },
+          txt: _useDirCon
+              ? {
+                  'ble-service-uuids': Uint8List.fromList(OpenBikeControlConstants.SERVICE_UUID.codeUnits),
+                  'mac-address': Uint8List.fromList('00:11:22:33:44:55'.codeUnits),
+                  'serial-number': Uint8List.fromList('1234567890'.codeUnits),
+                }
+              : {
+                  'version': Uint8List.fromList([0x01]),
+                  'id': Uint8List.fromList('1337'.codeUnits),
+                  'name': Uint8List.fromList('BikeControl'.codeUnits),
+                  'service-uuids': Uint8List.fromList(OpenBikeControlConstants.SERVICE_UUID.codeUnits),
+                  'manufacturer': Uint8List.fromList('OpenBikeControl'.codeUnits),
+                  'model': Uint8List.fromList('BikeControl app'.codeUnits),
+                },
         ),
       );
       print('Service: ${_mdnsRegistration!.id} at ${localIP.address}:$_mdnsRegistration');
@@ -103,7 +115,7 @@ class OpenBikeControlMdnsEmulator extends TrainerConnection {
   Future<void> _createTcpServer() async {
     try {
       _server = await ServerSocket.bind(
-        InternetAddress.anyIPv6,
+        InternetAddress.anyIPv4,
         36867,
         shared: true,
         v6Only: false,
@@ -118,11 +130,16 @@ class OpenBikeControlMdnsEmulator extends TrainerConnection {
 
     // Accept connection
     _server!.listen(
-      (Socket socket) {
+      (Socket socket) async {
+        SharedLogic.keepAlive();
         _socket = socket;
 
         if (kDebugMode) {
           print('Client connected: ${socket.remoteAddress.address}:${socket.remotePort}');
+        }
+
+        if (_useDirCon) {
+          _dirCon = ObcDircon(socket: socket, onMessageCallback: this);
         }
 
         // Listen for data from the client
@@ -131,21 +148,15 @@ class OpenBikeControlMdnsEmulator extends TrainerConnection {
             if (kDebugMode) {
               print('Received message: ${bytesToHex(data)}');
             }
-            final messageType = data[0];
-            switch (messageType) {
-              case OpenBikeProtocolParser.MSG_TYPE_APP_INFO:
-                final appInfo = OpenBikeProtocolParser.parseAppInfo(Uint8List.fromList(data));
-                isConnected.value = true;
-                connectedApp.value = appInfo;
-                core.connection.signalNotification(
-                  AlertNotification(LogLevel.LOGLEVEL_INFO, 'Connected to app: ${appInfo.appId}'),
-                );
-                break;
-              default:
-                print('Unknown message type: $messageType');
+            if (_dirCon != null) {
+              _dirCon!.handleIncomingData(data);
+              return;
             }
+            onMessage(data);
           },
           onDone: () {
+            _dirCon = null;
+            SharedLogic.stopKeepAlive();
             core.connection.signalNotification(
               AlertNotification(LogLevel.LOGLEVEL_INFO, 'Disconnected from app: ${connectedApp.value?.appId}'),
             );
@@ -160,27 +171,78 @@ class OpenBikeControlMdnsEmulator extends TrainerConnection {
 
   @override
   Future<ActionResult> sendAction(KeyPair keyPair, {required bool isKeyDown, required bool isKeyUp}) async {
-    final buttons = keyPair.buttons;
+    final inGameAction = keyPair.inGameAction;
 
-    if (_socket == null) {
+    final mappedButtons = connectedApp.value!.supportedButtons.filter(
+      (supportedButton) => supportedButton.action == inGameAction,
+    );
+
+    if (inGameAction == null) {
+      return Error('Invalid in-game action for key pair: $keyPair');
+    } else if (_socket == null) {
       print('No client connected, cannot send button press');
       return Error('No client connected');
     } else if (connectedApp.value == null) {
       return Error('No app info received from central');
-    } else if (connectedApp.value!.supportedButtons.containsAll(buttons)) {
-      return NotHandled('App does not support all buttons: ${buttons.map((b) => b.name).join(', ')}');
+    } else if (mappedButtons.isEmpty) {
+      return NotHandled('App does not support: ${inGameAction.title}');
     }
 
-    final responseData = OpenBikeProtocolParser.encodeButtonState(
-      buttons.map((b) => ButtonState(b, isKeyDown ? 1 : 0)).toList(),
-    );
-    _write(_socket!, responseData);
+    if (isKeyDown && isKeyUp) {
+      final responseDataDown = OpenBikeProtocolParser.encodeButtonState(
+        mappedButtons.map((b) => ButtonState(b, 1)).toList(),
+      );
+      _write(_socket!, responseDataDown);
+      final responseDataUp = OpenBikeProtocolParser.encodeButtonState(
+        mappedButtons.map((b) => ButtonState(b, 0)).toList(),
+      );
+      _write(_socket!, responseDataUp);
+    } else {
+      final responseData = OpenBikeProtocolParser.encodeButtonState(
+        mappedButtons.map((b) => ButtonState(b, isKeyDown ? 1 : 0)).toList(),
+      );
+      _write(_socket!, responseData);
+    }
 
-    return Success('Sent ${buttons.map((b) => b.name).join(', ')} button press');
+    return Success('Sent ${inGameAction.title} button press');
   }
 
   void _write(Socket socket, List<int> responseData) {
-    print('Sending response: ${bytesToHex(responseData)}');
-    socket.add(responseData);
+    debugPrint('Sending response: ${bytesToHex(responseData)}');
+    if (_dirCon != null) {
+      _dirCon!.sendCharacteristicNotification(OpenBikeControlConstants.BUTTON_STATE_CHARACTERISTIC_UUID, responseData);
+      return;
+    } else {
+      socket.add(responseData);
+    }
+  }
+
+  @override
+  void onMessage(List<int> message) {
+    if (kDebugMode) {
+      print('Received message from OBC: ${bytesToHex(message)}');
+    }
+    final messageType = message[0];
+    switch (messageType) {
+      case OpenBikeProtocolParser.MSG_TYPE_APP_INFO:
+        try {
+          final appInfo = OpenBikeProtocolParser.parseAppInfo(Uint8List.fromList(message));
+          isConnected.value = true;
+          connectedApp.value = appInfo;
+
+          supportedActions = appInfo.supportedButtons.mapNotNull((b) => b.action).toList();
+          core.connection.signalNotification(
+            AlertNotification(LogLevel.LOGLEVEL_INFO, 'Connected to app: ${appInfo.appId}'),
+          );
+        } catch (e) {
+          core.connection.signalNotification(LogNotification('Failed to parse app info: $e'));
+        }
+        break;
+      case OpenBikeProtocolParser.MSG_TYPE_HAPTIC_FEEDBACK:
+        // noop
+        break;
+      default:
+        print('Unknown message type: $messageType');
+    }
   }
 }

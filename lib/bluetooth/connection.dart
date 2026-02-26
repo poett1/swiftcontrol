@@ -1,22 +1,21 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:bike_control/bluetooth/devices/bluetooth_device.dart';
+import 'package:bike_control/bluetooth/devices/gamepad/gamepad_device.dart';
+import 'package:bike_control/bluetooth/devices/gyroscope/gyroscope_steering.dart';
+import 'package:bike_control/bluetooth/devices/hid/hid_device.dart';
+import 'package:bike_control/bluetooth/devices/wahoo/wahoo_kickr_headwind.dart';
+import 'package:bike_control/gen/l10n.dart';
+import 'package:bike_control/main.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/iap/iap_manager.dart';
+import 'package:bike_control/utils/requirements/android.dart';
 import 'package:dartx/dartx.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:gamepads/gamepads.dart';
-import 'package:shadcn_flutter/shadcn_flutter.dart';
-import 'package:swift_control/bluetooth/devices/bluetooth_device.dart';
-import 'package:swift_control/bluetooth/devices/gamepad/gamepad_device.dart';
-import 'package:swift_control/bluetooth/devices/hid/hid_device.dart';
-import 'package:swift_control/bluetooth/devices/wahoo/wahoo_kickr_headwind.dart';
-import 'package:swift_control/bluetooth/devices/zwift/ftms_mdns_emulator.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pb.dart';
-import 'package:swift_control/main.dart';
-import 'package:swift_control/utils/actions/android.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/keymap/keymap.dart';
-import 'package:swift_control/utils/requirements/android.dart';
+import 'package:prop/prop.dart';
 import 'package:universal_ble/universal_ble.dart';
 
 import 'devices/base_device.dart';
@@ -28,10 +27,12 @@ class Connection {
 
   List<BluetoothDevice> get bluetoothDevices => devices.whereType<BluetoothDevice>().toList();
   List<GamepadDevice> get gamepadDevices => devices.whereType<GamepadDevice>().toList();
+  List<GyroscopeSteering> get gyroscopeDevices => devices.whereType<GyroscopeSteering>().toList();
   List<WahooKickrHeadwind> get accessories => devices.whereType<WahooKickrHeadwind>().toList();
   List<BaseDevice> get controllerDevices => [
     ...bluetoothDevices.where((d) => d is! WahooKickrHeadwind),
     ...gamepadDevices,
+    ...gyroscopeDevices,
     ...devices.whereType<HidDevice>(),
   ];
 
@@ -48,6 +49,8 @@ class Connection {
   final Map<BaseDevice, StreamSubscription<bool>> _connectionSubscriptions = {};
   final StreamController<BaseDevice> _connectionStreams = StreamController<BaseDevice>.broadcast();
   Stream<BaseDevice> get connectionStream => _connectionStreams.stream;
+  final StreamController<BluetoothDevice> _rssiConnectionStreams = StreamController<BluetoothDevice>.broadcast();
+  Stream<BluetoothDevice> get rssiConnectionStream => _rssiConnectionStreams.stream;
 
   final _lastScanResult = <BleDevice>[];
   final ValueNotifier<bool> hasDevices = ValueNotifier(false);
@@ -61,6 +64,12 @@ class Connection {
       lastLogEntries = lastLogEntries.takeLast(kIsWeb ? 1000 : 60).toList();
     });
 
+    if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isIOS)) {
+      core.mediaKeyHandler.initialize();
+      // Load saved media key detection state
+      core.mediaKeyHandler.isMediaKeyDetectionEnabled.value = core.settings.getMediaKeyDetectionEnabled();
+    }
+
     UniversalBle.onAvailabilityChange = (available) {
       _actionStreams.add(BluetoothAvailabilityNotification(available == AvailabilityState.poweredOn));
       if (available == AvailabilityState.poweredOn && !kIsWeb) {
@@ -70,7 +79,8 @@ class Connection {
           }
         });
       } else if (available == AvailabilityState.poweredOff) {
-        reset();
+        disconnectAll();
+        stop();
       }
     };
     UniversalBle.onScanResult = (result) {
@@ -80,30 +90,42 @@ class Connection {
       );
       if (existingDevice != null && existingDevice.rssi != result.rssi) {
         existingDevice.rssi = result.rssi;
-        _connectionStreams.add(existingDevice); // Notify UI of update
+        _rssiConnectionStreams.add(existingDevice); // Notify UI of update
       }
 
       if (_lastScanResult.none((e) => e.deviceId == result.deviceId && e.services.contentEquals(result.services))) {
         _lastScanResult.add(result);
 
         if (kDebugMode) {
-          print('Scan result: ${result.name} - ${result.deviceId}');
+          debugPrint('Scan result: ${result.name} - ${result.deviceId} - Services: ${result.services}');
         }
 
-        final scanResult = BluetoothDevice.fromScanResult(result);
+        try {
+          final scanResult = BluetoothDevice.fromScanResult(result);
 
-        if (scanResult != null) {
-          _actionStreams.add(LogNotification('Found new device: ${kIsWeb ? scanResult.name : scanResult.runtimeType}'));
-          addDevices([scanResult]);
-        } else {
-          final manufacturerData = result.manufacturerDataList;
-          final data = manufacturerData
-              .firstOrNullWhere((e) => e.companyId == ZwiftConstants.ZWIFT_MANUFACTURER_ID)
-              ?.payload;
-          if (data != null && kDebugMode) {
+          if (scanResult != null) {
             _actionStreams.add(
-              LogNotification('Found unknown device ${result.name} with identifier: ${data.firstOrNull}'),
+              LogNotification('Found new device: ${kIsWeb ? scanResult.toString() : scanResult.runtimeType}'),
             );
+            addDevices([scanResult]);
+          } else {
+            final manufacturerData = result.manufacturerDataList;
+            final data = manufacturerData
+                .firstOrNullWhere((e) => e.companyId == ZwiftConstants.ZWIFT_MANUFACTURER_ID)
+                ?.payload;
+            if (data != null && kDebugMode) {
+              _actionStreams.add(
+                LogNotification('Found unknown device ${result.name} with identifier: ${data.firstOrNull}'),
+              );
+            }
+          }
+        } catch (e, backtrace) {
+          _actionStreams.add(
+            LogNotification("Error processing scan result for device ${result.deviceId}: $e\n$backtrace"),
+          );
+          if (kDebugMode) {
+            print(e);
+            print("backtrace: $backtrace");
           }
         }
       }
@@ -120,7 +142,7 @@ class Connection {
           // on web, log all characteristic changes for debugging
           _actionStreams.add(
             LogNotification(
-              'Characteristic update for device ${device.name}, char: $characteristicUuid, value: ${bytesToReadableHex(value)}',
+              'Characteristic update for device ${device.toString()}, char: $characteristicUuid, value: ${bytesToReadableHex(value)}',
             ),
           );
         }
@@ -129,7 +151,7 @@ class Connection {
         } catch (e, backtrace) {
           _actionStreams.add(
             LogNotification(
-              "Error processing characteristic for device ${device.name} and char: $characteristicUuid: $e\n$backtrace",
+              "Error processing characteristic for device ${device.toString()} and char: $characteristicUuid: $e\n$backtrace",
             ),
           );
           if (kDebugMode) {
@@ -154,6 +176,9 @@ class Connection {
           performScanning();
         }
       });
+      if (core.settings.getPhoneSteeringEnabled()) {
+        toggleGyroscopeSteering(true);
+      }
     }
   }
 
@@ -163,6 +188,10 @@ class Connection {
     }
     isScanning.value = true;
     _actionStreams.add(LogNotification('Scanning for devices...'));
+
+    if (screenshotMode) {
+      return;
+    }
 
     // does not work on web, may not work on Windows
     if (!kIsWeb && !Platform.isWindows) {
@@ -202,14 +231,6 @@ class Connection {
     } else {
       isScanning.value = false;
     }
-
-    if (devices.isNotEmpty && !_androidNotificationsSetup && !kIsWeb && Platform.isAndroid) {
-      _androidNotificationsSetup = true;
-      // start foreground service only when app is in foreground
-      NotificationRequirement.setup().catchError((e) {
-        _actionStreams.add(LogNotification(e.toString()));
-      });
-    }
   }
 
   Future<void> startMyWhooshServer() {
@@ -248,16 +269,28 @@ class Connection {
     hasDevices.value = devices.isNotEmpty;
   }
 
+  void toggleGyroscopeSteering(bool enable) {
+    final existing = gyroscopeDevices.firstOrNull;
+    if (existing != null && !enable) {
+      // Remove gyroscope steering
+      disconnect(existing, forget: true, persistForget: false);
+    } else if (enable) {
+      // Add gyroscope steering
+      final gyroDevice = GyroscopeSteering();
+      addDevices([gyroDevice]);
+    }
+  }
+
   void _handleConnectionQueue() {
     // windows apparently has issues when connecting to multiple devices at once, so don't
     if (_connectionQueue.isNotEmpty && !_handlingConnectionQueue && !screenshotMode) {
       _handlingConnectionQueue = true;
       final device = _connectionQueue.removeAt(0);
-      _actionStreams.add(AlertNotification(LogLevel.LOGLEVEL_INFO, 'Connecting to: ${device.name}'));
+      _actionStreams.add(AlertNotification(LogLevel.LOGLEVEL_INFO, 'Connecting to: ${device.toString()}'));
       _connect(device)
           .then((_) {
             _handlingConnectionQueue = false;
-            _actionStreams.add(AlertNotification(LogLevel.LOGLEVEL_INFO, 'Connection finished: ${device.name}'));
+            _actionStreams.add(AlertNotification(LogLevel.LOGLEVEL_INFO, 'Connection finished: ${device.toString()}'));
             if (_connectionQueue.isNotEmpty) {
               _handleConnectionQueue();
             }
@@ -267,11 +300,11 @@ class Connection {
             _handlingConnectionQueue = false;
             if (e is TimeoutException) {
               _actionStreams.add(
-                AlertNotification(LogLevel.LOGLEVEL_WARNING, 'Unable to connect to ${device.name}: Timeout'),
+                AlertNotification(LogLevel.LOGLEVEL_WARNING, 'Unable to connect to ${device.toString()}: Timeout'),
               );
             } else {
               _actionStreams.add(
-                AlertNotification(LogLevel.LOGLEVEL_ERROR, 'Connection failed: ${device.name} - $e'),
+                AlertNotification(LogLevel.LOGLEVEL_ERROR, 'Connection failed: ${device.toString()} - $e'),
               );
             }
             if (_connectionQueue.isNotEmpty) {
@@ -287,9 +320,18 @@ class Connection {
         _actionStreams.add(data);
       });
       if (device is BluetoothDevice) {
-        final connectionStateSubscription = UniversalBle.connectionStream(device.device.deviceId).listen((state) {
+        final connectionStateSubscription = device.device.connectionStream.listen((state) {
           device.isConnected = state;
           _connectionStreams.add(device);
+          core.flutterLocalNotificationsPlugin.show(
+            1338,
+            '${device.toString()} ${state ? AppLocalizations.current.connected.decapitalize() : AppLocalizations.current.disconnected.decapitalize()}',
+            !state ? AppLocalizations.current.tryingToConnectAgain : null,
+            NotificationDetails(
+              android: AndroidNotificationDetails('Connection', 'Connection Status'),
+              iOS: DarwinNotificationDetails(presentAlert: true, presentSound: false),
+            ),
+          );
           if (!device.isConnected) {
             disconnect(device, forget: false, persistForget: false);
             // try reconnect
@@ -302,22 +344,19 @@ class Connection {
       await device.connect();
       signalChange(device);
 
-      final newButtons = device.availableButtons.filter(
-        (button) => core.actionHandler.supportedApp?.keymap.getKeyPair(button) == null,
-      );
-      for (final button in newButtons) {
-        core.actionHandler.supportedApp?.keymap.addKeyPair(
-          KeyPair(
-            touchPosition: Offset.zero,
-            buttons: [button],
-            physicalKey: null,
-            logicalKey: null,
-            isLongPress: false,
-          ),
-        );
-      }
+      IAPManager.instance.setAttributes();
+
+      core.actionHandler.supportedApp?.keymap.addNewButtons(device.availableButtons);
 
       _streamSubscriptions[device] = actionSubscription;
+
+      if (devices.isNotEmpty && !_androidNotificationsSetup && !kIsWeb && Platform.isAndroid) {
+        _androidNotificationsSetup = true;
+        // start foreground service only when app is in foreground
+        NotificationRequirement.addPersistentNotification().catchError((e) {
+          _actionStreams.add(LogNotification(e.toString()));
+        });
+      }
     } catch (e, backtrace) {
       _actionStreams.add(LogNotification("$e\n$backtrace"));
       if (kDebugMode) {
@@ -326,31 +365,6 @@ class Connection {
       }
       rethrow;
     }
-  }
-
-  Future<void> reset() async {
-    _actionStreams.add(LogNotification('Disconnecting all devices'));
-    if (core.actionHandler is AndroidActions) {
-      AndroidFlutterLocalNotificationsPlugin().stopForegroundService();
-      _androidNotificationsSetup = false;
-    }
-    final isBtEnabled = (await UniversalBle.getBluetoothAvailabilityState()) == AvailabilityState.poweredOn;
-    if (isBtEnabled) {
-      UniversalBle.stopScan();
-    }
-    isScanning.value = false;
-    for (var device in bluetoothDevices) {
-      _streamSubscriptions[device]?.cancel();
-      _streamSubscriptions.remove(device);
-      _connectionSubscriptions[device]?.cancel();
-      _connectionSubscriptions.remove(device);
-      UniversalBle.disconnect(device.device.deviceId);
-      signalChange(device);
-    }
-    _gamePadSearchTimer?.cancel();
-    _lastScanResult.clear();
-    hasDevices.value = false;
-    devices.clear();
   }
 
   void signalNotification(BaseNotification notification) {
@@ -369,8 +383,8 @@ class Connection {
     if (device is BluetoothDevice) {
       if (persistForget) {
         // Add device to ignored list when forgetting
-        await core.settings.addIgnoredDevice(device.device.deviceId, device.name);
-        _actionStreams.add(LogNotification('Device ignored: ${device.name}'));
+        await core.settings.addIgnoredDevice(device.device.deviceId, device.toString());
+        _actionStreams.add(LogNotification('Device ignored: ${device.toString()}'));
       }
       if (!forget) {
         // allow reconnection
@@ -386,8 +400,43 @@ class Connection {
       // Remove device from the list
       devices.remove(device);
       hasDevices.value = devices.isNotEmpty;
+    } else if (device is GyroscopeSteering) {
+      // Clean up subscriptions
+      _streamSubscriptions[device]?.cancel();
+      _streamSubscriptions.remove(device);
+      _connectionSubscriptions[device]?.cancel();
+      _connectionSubscriptions.remove(device);
+
+      // Remove device from the list
+      devices.remove(device);
+      hasDevices.value = devices.isNotEmpty;
     }
 
     signalChange(device);
+  }
+
+  Future<void> disconnectAll() async {
+    _actionStreams.add(LogNotification('Disconnecting all devices'));
+    for (var device in bluetoothDevices) {
+      _streamSubscriptions[device]?.cancel();
+      _streamSubscriptions.remove(device);
+      _connectionSubscriptions[device]?.cancel();
+      _connectionSubscriptions.remove(device);
+      device.disconnect();
+      signalChange(device);
+      devices.remove(device);
+    }
+    _gamePadSearchTimer?.cancel();
+    _lastScanResult.clear();
+    hasDevices.value = false;
+  }
+
+  Future<void> stop() async {
+    final isBtEnabled = (await UniversalBle.getBluetoothAvailabilityState()) == AvailabilityState.poweredOn;
+    if (isBtEnabled) {
+      UniversalBle.stopScan();
+    }
+    isScanning.value = false;
+    _androidNotificationsSetup = false;
   }
 }

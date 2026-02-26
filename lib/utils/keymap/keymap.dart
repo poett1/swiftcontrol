@@ -1,14 +1,36 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:accessibility/accessibility.dart';
+import 'package:bike_control/gen/l10n.dart';
+import 'package:bike_control/main.dart';
+import 'package:bike_control/utils/actions/android.dart';
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/keymap/buttons.dart';
 import 'package:dartx/dartx.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/keymap/buttons.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../actions/base_actions.dart';
 import 'apps/custom_app.dart';
+
+enum AndroidSystemAction {
+  back('Back', Icons.arrow_back_ios, GlobalAction.back),
+  dpadCenter('Select', Icons.radio_button_checked_outlined, GlobalAction.dpadCenter),
+  down('Arrow Down', Icons.arrow_downward, GlobalAction.down),
+  right('Arrow Right', Icons.arrow_forward, GlobalAction.right),
+  up('Arrow Up', Icons.arrow_upward, GlobalAction.up),
+  left('Arrow Left', Icons.arrow_back, GlobalAction.left),
+  home('Home', Icons.home_outlined, GlobalAction.home),
+  recents('Recents', Icons.apps, GlobalAction.recents);
+
+  final String title;
+  final IconData icon;
+  final GlobalAction globalAction;
+
+  const AndroidSystemAction(this.title, this.icon, this.globalAction);
+}
 
 class Keymap {
   static Keymap custom = Keymap(keyPairs: []);
@@ -47,6 +69,7 @@ class Keymap {
       keyPair.isLongPress = false;
       keyPair.inGameAction = null;
       keyPair.inGameActionValue = null;
+      keyPair.androidAction = null;
     }
     _updateStream.add(null);
   }
@@ -60,23 +83,46 @@ class Keymap {
     }
   }
 
-  ControllerButton getOrAddButton(String name, ControllerButton Function() button) {
+  ControllerButton getOrAddButton(String name, ControllerButton button) {
     final allButtons = keyPairs.expand((kp) => kp.buttons).toSet().toList();
     if (allButtons.none((b) => b.name == name)) {
-      final newButton = button();
       addKeyPair(
         KeyPair(
           touchPosition: Offset.zero,
-          buttons: [newButton],
+          buttons: [button],
           physicalKey: null,
           logicalKey: null,
-          isLongPress: false,
+          inGameAction: button.action,
+          isLongPress: button.action?.isLongPress ?? false,
         ),
       );
-      return newButton;
+      return button;
     } else {
       return allButtons.firstWhere((b) => b.name == name);
     }
+  }
+
+  void addNewButtons(List<ControllerButton> availableButtons) {
+    final newButtons = availableButtons.filter((button) => getKeyPair(button) == null);
+    for (final button in newButtons) {
+      final buttonFromBase = core.settings.getTrainerApp()?.keymap.getKeyPair(button);
+      addKeyPair(
+        KeyPair(
+          touchPosition: buttonFromBase?.touchPosition ?? Offset.zero,
+          buttons: [button],
+          inGameAction: button.action,
+          physicalKey: buttonFromBase?.physicalKey,
+          logicalKey: buttonFromBase?.logicalKey,
+          isLongPress: buttonFromBase?.isLongPress ?? false,
+          inGameActionValue: buttonFromBase?.inGameActionValue,
+          androidAction: buttonFromBase?.androidAction,
+        ),
+      );
+    }
+  }
+
+  void signalUpdate() {
+    _updateStream.add(null);
   }
 }
 
@@ -89,6 +135,7 @@ class KeyPair {
   bool isLongPress;
   InGameAction? inGameAction;
   int? inGameActionValue;
+  AndroidSystemAction? androidAction;
 
   KeyPair({
     required this.buttons,
@@ -99,6 +146,7 @@ class KeyPair {
     this.isLongPress = false,
     this.inGameAction,
     this.inGameActionValue,
+    this.androidAction,
   });
 
   bool get isSpecialKey =>
@@ -111,53 +159,123 @@ class KeyPair {
 
   IconData? get icon {
     return switch (physicalKey) {
-      _ when inGameAction != null && core.logic.emulatorEnabled => Icons.link,
+      _ when isSpecialKey && core.actionHandler.supportedModes.contains(SupportedMode.media) => switch (physicalKey) {
+        PhysicalKeyboardKey.mediaPlayPause => Icons.play_arrow_outlined,
+        PhysicalKeyboardKey.mediaStop => Icons.stop,
+        PhysicalKeyboardKey.mediaTrackPrevious => Icons.skip_previous,
+        PhysicalKeyboardKey.mediaTrackNext => Icons.skip_next,
+        PhysicalKeyboardKey.audioVolumeUp => Icons.volume_up,
+        PhysicalKeyboardKey.audioVolumeDown => Icons.volume_down,
+        _ => Icons.keyboard,
+      },
+      //_ when inGameAction != null && core.logic.emulatorEnabled => Icons.link,
+      _
+          when inGameAction != null &&
+              inGameAction!.icon != null &&
+              (core.logic.emulatorEnabled ||
+                  [InGameAction.headwindHeartRateMode, InGameAction.headwindSpeed].contains(inGameAction!)) =>
+        inGameAction!.icon,
 
-      PhysicalKeyboardKey.mediaPlayPause ||
-      PhysicalKeyboardKey.mediaStop ||
-      PhysicalKeyboardKey.mediaTrackPrevious ||
-      PhysicalKeyboardKey.mediaTrackNext ||
-      PhysicalKeyboardKey.audioVolumeUp ||
-      PhysicalKeyboardKey.audioVolumeDown => Icons.music_note_outlined,
+      _
+          when androidAction != null &&
+              core.logic.showLocalControl &&
+              core.settings.getLocalEnabled() &&
+              core.actionHandler is AndroidActions =>
+        androidAction!.icon,
       _ when physicalKey != null && core.actionHandler.supportedModes.contains(SupportedMode.keyboard) =>
-        Icons.keyboard,
-      _ when touchPosition != Offset.zero && core.logic.showLocalRemoteOptions => Icons.touch_app,
+        RadixIcons.keyboard,
+      _
+          when touchPosition != Offset.zero &&
+              core.logic.showLocalRemoteOptions &&
+              core.actionHandler is AndroidActions =>
+        Icons.touch_app,
+      _ when touchPosition != Offset.zero && core.logic.showLocalRemoteOptions => BootstrapIcons.mouse,
       _ => null,
     };
   }
 
   bool get hasNoAction =>
-      logicalKey == null && physicalKey == null && touchPosition == Offset.zero && inGameAction == null;
+      logicalKey == null &&
+      physicalKey == null &&
+      touchPosition == Offset.zero &&
+      inGameAction == null &&
+      androidAction == null;
 
   bool get hasActiveAction =>
-      (physicalKey != null &&
+      screenshotMode ||
+      (physicalKey != null && (core.logic.showLocalControl && core.settings.getLocalEnabled()) ||
+          (core.logic.showRemote && core.settings.getRemoteKeyboardControlEnabled()) &&
+              core.actionHandler.supportedModes.contains(SupportedMode.keyboard)) ||
+      (isSpecialKey &&
           core.logic.showLocalControl &&
           core.settings.getLocalEnabled() &&
-          core.actionHandler.supportedModes.contains(SupportedMode.keyboard)) ||
+          core.actionHandler is AndroidActions) ||
+      (androidAction != null &&
+          core.logic.showLocalControl &&
+          core.settings.getLocalEnabled() &&
+          core.actionHandler is AndroidActions) ||
       (touchPosition != Offset.zero &&
           core.logic.showLocalRemoteOptions &&
           core.actionHandler.supportedModes.contains(SupportedMode.touch)) ||
-      (inGameAction != null && core.logic.emulatorEnabled);
+      (inGameAction != null &&
+          core.logic.obpConnectedApp != null &&
+          core.logic.obpConnectedApp!.supportedActions.contains(inGameAction)) ||
+      (inGameAction != null &&
+          core.logic.showMyWhooshLink &&
+          core.settings.getMyWhooshLinkEnabled() &&
+          core.whooshLink.supportedActions.contains(inGameAction)) ||
+      (inGameAction != null &&
+          core.logic.showZwiftBleEmulator &&
+          core.settings.getZwiftBleEmulatorEnabled() &&
+          core.zwiftEmulator.supportedActions.contains(inGameAction)) ||
+      (inGameAction != null &&
+          core.logic.showZwiftMsdnEmulator &&
+          core.settings.getZwiftMdnsEmulatorEnabled() &&
+          core.zwiftMdnsEmulator.supportedActions.contains(inGameAction)) ||
+      (inGameAction != null &&
+          [InGameAction.headwindHeartRateMode, InGameAction.headwindSpeed].contains(inGameAction) &&
+          (core.connection.accessories.isNotEmpty || kDebugMode));
 
   @override
   String toString() {
-    final baseKey =
-        logicalKey?.keyLabel ??
-        switch (physicalKey) {
-          PhysicalKeyboardKey.mediaPlayPause => 'Play/Pause',
-          PhysicalKeyboardKey.mediaTrackNext => 'Next Track',
-          PhysicalKeyboardKey.mediaTrackPrevious => 'Previous Track',
-          PhysicalKeyboardKey.mediaStop => 'Stop',
-          PhysicalKeyboardKey.audioVolumeUp => 'Volume Up',
-          PhysicalKeyboardKey.audioVolumeDown => 'Volume Down',
-          _ => 'Not assigned',
-        };
+    final text =
+        (inGameAction != null &&
+            (core.logic.emulatorEnabled ||
+                [InGameAction.headwindHeartRateMode, InGameAction.headwindSpeed].contains(inGameAction!)))
+        ? [
+            inGameAction!.title,
+            if (inGameActionValue != null) '$inGameActionValue',
+          ].joinToString(separator: ': ')
+        : (androidAction != null && core.logic.showLocalControl && core.actionHandler is AndroidActions)
+        ? androidAction!.title
+        : (isSpecialKey && core.actionHandler.supportedModes.contains(SupportedMode.media))
+        ? switch (physicalKey) {
+            PhysicalKeyboardKey.mediaPlayPause => AppLocalizations.current.playPause,
+            PhysicalKeyboardKey.mediaStop => AppLocalizations.current.stop,
+            PhysicalKeyboardKey.mediaTrackPrevious => AppLocalizations.current.previous,
+            PhysicalKeyboardKey.mediaTrackNext => AppLocalizations.current.next,
+            PhysicalKeyboardKey.audioVolumeUp => AppLocalizations.current.volumeUp,
+            PhysicalKeyboardKey.audioVolumeDown => AppLocalizations.current.volumeDown,
+            _ => 'Unknown',
+          }
+        : (physicalKey != null && core.actionHandler.supportedModes.contains(SupportedMode.keyboard))
+        ? null
+        : (touchPosition != Offset.zero && core.logic.showLocalRemoteOptions)
+        ? 'X:${touchPosition.dx.toInt()}, Y:${touchPosition.dy.toInt()}${inGameAction != null ? ' (${inGameAction!.title})' : ''}'
+        : '';
+    if (text != null && text.isNotEmpty) {
+      return text;
+    }
+    final baseKey = logicalKey?.keyLabel ?? text ?? 'Not assigned';
 
+    if (physicalKey == null || !core.actionHandler.supportedModes.contains(SupportedMode.keyboard)) {
+      return 'Not assigned';
+    }
     if (modifiers.isEmpty || baseKey == 'Not assigned') {
       if (baseKey.trim().isEmpty) {
         return 'Space';
       }
-      return baseKey;
+      return baseKey + (inGameAction != null ? ' (${inGameAction!.title})' : '');
     }
 
     // Format modifiers + key (e.g., "Ctrl+Alt+R")
@@ -179,7 +297,16 @@ class KeyPair {
     // encode to save in preferences
 
     return jsonEncode({
-      'actions': buttons.map((e) => e.name).toList(),
+      'actions': buttons
+          .map(
+            (e) => e.sourceDeviceId == null
+                ? e.name
+                : {
+                    'name': e.name,
+                    'deviceId': e.sourceDeviceId,
+                  },
+          )
+          .toList(),
       if (logicalKey != null) 'logicalKey': logicalKey?.keyId.toString(),
       if (physicalKey != null) 'physicalKey': physicalKey?.usbHidUsage.toString() ?? '0',
       if (modifiers.isNotEmpty) 'modifiers': modifiers.map((e) => e.name).toList(),
@@ -187,6 +314,7 @@ class KeyPair {
       'isLongPress': isLongPress,
       'inGameAction': inGameAction?.name,
       'inGameActionValue': inGameActionValue,
+      'androidAction': androidAction?.name,
     });
   }
 
@@ -202,11 +330,33 @@ class KeyPair {
           )
         : Offset.zero;
 
-    final buttons = decoded['actions']
-        .map<ControllerButton>(
-          (e) => ControllerButton.values.firstOrNullWhere((element) => element.name == e) ?? ControllerButton(e),
-        )
-        .cast<ControllerButton>()
+    ControllerButton? decodeButton(dynamic raw) {
+      String? name;
+      String? deviceId;
+
+      if (raw is String) {
+        name = raw;
+      } else if (raw is Map) {
+        name = raw['name']?.toString();
+        deviceId = raw['deviceId']?.toString();
+      }
+
+      if (name == null) {
+        return null;
+      }
+
+      final baseButton = ControllerButton.values.firstOrNullWhere((element) => element.name == name);
+
+      if (baseButton != null) {
+        return baseButton.copyWith(sourceDeviceId: deviceId);
+      }
+
+      return ControllerButton(name, sourceDeviceId: deviceId);
+    }
+
+    final buttons = (decoded['actions'] as List)
+        .map<ControllerButton?>(decodeButton)
+        .whereType<ControllerButton>()
         .toList();
     if (buttons.isEmpty) {
       return null;
@@ -235,6 +385,9 @@ class KeyPair {
           ? InGameAction.values.firstOrNullWhere((element) => element.name == decoded['inGameAction'])
           : null,
       inGameActionValue: decoded['inGameActionValue'],
+      androidAction: decoded.containsKey('androidAction')
+          ? AndroidSystemAction.values.firstOrNullWhere((element) => element.name == decoded['androidAction'])
+          : null,
     );
   }
 
@@ -249,7 +402,8 @@ class KeyPair {
           touchPosition == other.touchPosition &&
           isLongPress == other.isLongPress &&
           inGameAction == other.inGameAction &&
-          inGameActionValue == other.inGameActionValue;
+          inGameActionValue == other.inGameActionValue &&
+          androidAction == other.androidAction;
 
   @override
   int get hashCode => Object.hash(
@@ -260,5 +414,6 @@ class KeyPair {
     isLongPress,
     inGameAction,
     inGameActionValue,
+    androidAction,
   );
 }

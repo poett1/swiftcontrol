@@ -2,17 +2,17 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:bike_control/utils/actions/base_actions.dart' as actions;
+import 'package:bike_control/utils/core.dart';
+import 'package:bike_control/utils/i18n_extension.dart';
+import 'package:bike_control/utils/keymap/apps/custom_app.dart';
+import 'package:bike_control/utils/keymap/buttons.dart';
+import 'package:bike_control/widgets/ui/button_widget.dart';
+import 'package:bike_control/widgets/ui/toast.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:prop/prop.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
-import 'package:swift_control/bluetooth/devices/zwift/protocol/zp.pb.dart';
-import 'package:swift_control/utils/actions/base_actions.dart' as actions;
-import 'package:swift_control/utils/core.dart';
-import 'package:swift_control/utils/i18n_extension.dart';
-import 'package:swift_control/utils/keymap/apps/custom_app.dart';
-import 'package:swift_control/utils/keymap/buttons.dart';
-import 'package:swift_control/widgets/ui/button_widget.dart';
-import 'package:swift_control/widgets/ui/toast.dart';
 
 import '../bluetooth/messages/notification.dart';
 
@@ -49,7 +49,7 @@ class Testbed extends StatefulWidget {
   State<Testbed> createState() => _TestbedState();
 }
 
-class _TestbedState extends State<Testbed> with SingleTickerProviderStateMixin {
+class _TestbedState extends State<Testbed> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final Ticker _ticker;
   late StreamSubscription<BaseNotification> _actionSubscription;
 
@@ -67,6 +67,8 @@ class _TestbedState extends State<Testbed> with SingleTickerProviderStateMixin {
 
   Offset? _lastMove;
 
+  bool _isInBackground = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -75,23 +77,39 @@ class _TestbedState extends State<Testbed> with SingleTickerProviderStateMixin {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _isInBackground = state == AppLifecycleState.paused || state == AppLifecycleState.hidden;
+  }
+
+  @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _focusNode = FocusNode(debugLabel: 'TestbedFocus', canRequestFocus: true, skipTraversal: true);
     _actionSubscription = core.connection.actionStream.listen((data) async {
-      if (!mounted) {
+      if (!mounted || (_isInBackground && data is! AlertNotification)) {
         return;
       }
       if (data is ButtonNotification && data.buttonsClicked.isNotEmpty) {
-        if (core.actionHandler.supportedApp == null) {
-          buildToast(context, level: LogLevel.LOGLEVEL_WARNING, title: context.i18n.selectTrainerAppAndTarget);
+        if (core.settings.getShowOnboarding()) {
+          final button = data.buttonsClicked.first;
+          final sample = _KeySample(
+            button: button,
+            text: '🔘 ${button.name}',
+            timestamp: DateTime.now(),
+          );
+          _keys.insert(0, sample);
+          if (_keys.length > widget.maxKeyboardEvents) {
+            _keys.removeLast();
+          }
+        } else if (core.actionHandler.supportedApp == null) {
+          buildToast(level: LogLevel.LOGLEVEL_WARNING, title: context.i18n.selectTrainerAppAndTarget);
         } else {
           final button = data.buttonsClicked.first;
           if (core.actionHandler.supportedApp is! CustomApp &&
               core.actionHandler.supportedApp?.keymap.getKeyPair(button) == null) {
             buildToast(
-              context,
               level: LogLevel.LOGLEVEL_WARNING,
               titleWidget: Text.rich(
                 TextSpan(
@@ -125,9 +143,8 @@ class _TestbedState extends State<Testbed> with SingleTickerProviderStateMixin {
             }
           }
         }
-      } else if (data is ActionNotification) {
+      } else if (data is ActionNotification && data.result is! actions.Ignored) {
         buildToast(
-          context,
           location: ToastLocation.bottomLeft,
           level: data.result is actions.Error ? LogLevel.LOGLEVEL_WARNING : LogLevel.LOGLEVEL_INFO,
           title: data.result.message,
@@ -135,10 +152,11 @@ class _TestbedState extends State<Testbed> with SingleTickerProviderStateMixin {
         );
       } else if (data is AlertNotification) {
         buildToast(
-          context,
           location: ToastLocation.bottomRight,
           level: data.level,
           title: data.alertMessage,
+          closeTitle: data.buttonTitle ?? 'Close',
+          onClose: data.onTap,
         );
       }
     });
@@ -160,6 +178,7 @@ class _TestbedState extends State<Testbed> with SingleTickerProviderStateMixin {
   void dispose() {
     _ticker.dispose();
     _focusNode.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -213,29 +232,6 @@ class _TestbedState extends State<Testbed> with SingleTickerProviderStateMixin {
     setState(() {});
   }
 
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (!widget.enabled || !widget.showKeyboard || event is KeyUpEvent) return KeyEventResult.ignored;
-
-    final label = event.logicalKey.keyLabel;
-    final keyName = label.isNotEmpty ? label : event.logicalKey.debugName ?? 'Key';
-    final isDown = event is KeyDownEvent;
-    final isUp = event is KeyUpEvent;
-
-    buildToast(
-      context,
-
-      location: ToastLocation.bottomLeft,
-      title:
-          '${isDown
-              ? "↓"
-              : isUp
-              ? "↑"
-              : "•"} $keyName',
-    );
-    // We don't want to prevent normal text input, so we return ignored.
-    return KeyEventResult.ignored;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Listener(
@@ -249,7 +245,6 @@ class _TestbedState extends State<Testbed> with SingleTickerProviderStateMixin {
         autofocus: true,
         canRequestFocus: true,
         descendantsAreFocusable: true,
-        onKeyEvent: _onKey,
         child: Stack(
           fit: StackFit.passthrough,
           children: [
@@ -269,7 +264,7 @@ class _TestbedState extends State<Testbed> with SingleTickerProviderStateMixin {
             if (widget.showKeyboard)
               Positioned(
                 right: 12,
-                bottom: _isMobile ? 92 : 12,
+                bottom: _isMobile && !core.settings.getShowOnboarding() ? 92 : 12,
                 child: IgnorePointer(
                   child: _KeyboardOverlay(
                     items: _keys,

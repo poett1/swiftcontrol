@@ -1,8 +1,7 @@
+import 'package:bike_control/utils/keymap/apps/supported_app.dart';
+import 'package:bike_control/utils/requirements/multi.dart';
 import 'package:dartx/dartx.dart';
 import 'package:flutter/services.dart';
-import 'package:swift_control/main.dart';
-import 'package:swift_control/utils/keymap/apps/supported_app.dart';
-import 'package:swift_control/utils/requirements/multi.dart';
 
 import '../buttons.dart';
 import '../keymap.dart';
@@ -14,7 +13,7 @@ class MyWhoosh extends SupportedApp {
         packageName: "com.mywhoosh.whooshgame",
         compatibleTargets: Target.values,
         supportsZwiftEmulation: false,
-        supportsOpenBikeProtocol: screenshotMode,
+        star: true,
         keymap: Keymap(
           keyPairs: [
             ...ControllerButton.values
@@ -44,8 +43,8 @@ class MyWhoosh extends SupportedApp {
                 .map(
                   (b) => KeyPair(
                     buttons: [b],
-                    physicalKey: PhysicalKeyboardKey.arrowRight,
-                    logicalKey: LogicalKeyboardKey.arrowRight,
+                    physicalKey: PhysicalKeyboardKey.keyD,
+                    logicalKey: LogicalKeyboardKey.keyD,
                     touchPosition: Offset(60, 80),
                     isLongPress: true,
                     inGameAction: InGameAction.steerRight,
@@ -56,8 +55,32 @@ class MyWhoosh extends SupportedApp {
                 .map(
                   (b) => KeyPair(
                     buttons: [b],
+                    physicalKey: PhysicalKeyboardKey.keyA,
+                    logicalKey: LogicalKeyboardKey.keyA,
+                    touchPosition: Offset(32, 80),
+                    isLongPress: true,
+                    inGameAction: InGameAction.steerLeft,
+                  ),
+                ),
+            ...ControllerButton.values
+                .filter((e) => e.action == InGameAction.navigateLeft)
+                .map(
+                  (b) => KeyPair(
+                    buttons: [b],
                     physicalKey: PhysicalKeyboardKey.arrowLeft,
                     logicalKey: LogicalKeyboardKey.arrowLeft,
+                    touchPosition: Offset(32, 80),
+                    isLongPress: true,
+                    inGameAction: InGameAction.steerLeft,
+                  ),
+                ),
+            ...ControllerButton.values
+                .filter((e) => e.action == InGameAction.navigateRight)
+                .map(
+                  (b) => KeyPair(
+                    buttons: [b],
+                    physicalKey: PhysicalKeyboardKey.arrowRight,
+                    logicalKey: LogicalKeyboardKey.arrowRight,
                     touchPosition: Offset(32, 80),
                     isLongPress: true,
                     inGameAction: InGameAction.steerLeft,
